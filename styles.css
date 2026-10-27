@@ -1,0 +1,657 @@
+/* ==========================================================================
+   Speech Craft - Premium Floating Audio Player Pill
+   ========================================================================== */
+
+/* 1. Main Floating Pill Container */
+.speech-craft-pill {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  z-index: 9999;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  height: 42px;
+  box-sizing: border-box;
+
+  background: var(--background-secondary, #202024);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  border: 1px solid var(--background-modifier-border, rgba(255, 255, 255, 0.12));
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
+
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+  user-select: none;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+  opacity: 1;
+}
+
+.speech-craft-pill.hidden {
+  transform: translateX(-50%) translateY(140%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 2. Language Badge & Progress Counter */
+.sc-pill-badge-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-right: 2px;
+}
+
+.sc-pill-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--background-primary, #ffffff);
+  border: 1px solid rgba(255, 153, 51, 0.4);
+  color: #ff9933;
+  line-height: 1.2;
+}
+
+.sc-pill-badge:not(.sc-badge-hi) {
+  color: var(--interactive-accent, #705df2);
+  border-color: var(--background-modifier-border);
+}
+
+.sc-pill-counter {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* 3. Controls Group (Circular Icon Buttons) */
+.sc-pill-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Standard circular button */
+.speech-craft-pill button.sc-pill-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  max-width: 28px !important;
+  max-height: 28px !important;
+  border-radius: 50% !important;
+  border: 1px solid var(--background-modifier-border, rgba(0, 0, 0, 0.08)) !important;
+  background: var(--background-primary, rgba(255, 255, 255, 0.9)) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+  color: var(--text-normal) !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease !important;
+  box-sizing: border-box !important;
+}
+
+.speech-craft-pill button.sc-pill-btn svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.speech-craft-pill button.sc-pill-btn:hover {
+  background: var(--background-modifier-hover, rgba(255, 255, 255, 1)) !important;
+  transform: translateY(-1px) scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1) !important;
+}
+
+.speech-craft-pill button.sc-pill-btn:active {
+  transform: translateY(0) scale(0.95);
+}
+
+/* Primary Play / Pause Button */
+.speech-craft-pill button.sc-pill-btn-play {
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  max-width: 32px !important;
+  max-height: 32px !important;
+  border-radius: 50% !important;
+  background: var(--interactive-accent, #6366f1) !important;
+  border: 1px solid var(--interactive-accent, #6366f1) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35) !important;
+}
+
+.speech-craft-pill button.sc-pill-btn-play svg {
+  width: 15px;
+  height: 15px;
+  color: #ffffff;
+  margin-left: 1.5px; /* Optically centers the play triangle vertex */
+}
+
+.speech-craft-pill button.sc-pill-btn-play:hover {
+  background: var(--interactive-accent-hover, #4f46e5) !important;
+  border-color: var(--interactive-accent-hover, #4f46e5) !important;
+  transform: translateY(-1px) scale(1.06);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.45) !important;
+}
+
+/* Loading Spin */
+.sc-spin svg {
+  animation: sc-rotate 1s linear infinite;
+  margin-left: 0 !important;
+}
+
+@keyframes sc-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 4. Subtle Vertical Dividers */
+.sc-pill-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--background-modifier-border, rgba(0, 0, 0, 0.1));
+  flex-shrink: 0;
+  margin: 0 2px;
+}
+
+/* Desktop layout order: controls-row unwraps cleanly into horizontal pill */
+.sc-pill-controls-row {
+  display: contents;
+}
+
+.sc-pill-badge-group {
+  order: 1;
+}
+
+.sc-pill-controls {
+  order: 2;
+}
+
+.sc-pill-divider-desktop-1 {
+  order: 3;
+}
+
+.sc-pill-progress-group {
+  order: 4;
+}
+
+.sc-pill-divider-desktop-2 {
+  order: 5;
+}
+
+.sc-pill-trailing-group {
+  order: 6;
+}
+
+/* 5. Progress Slider & Full Time Display */
+.sc-pill-progress-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 170px;
+  max-width: 250px;
+}
+
+.sc-pill-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--interactive-accent, #6366f1) 0%,
+    var(--interactive-accent, #6366f1) var(--slider-progress, 0%),
+    var(--background-modifier-border, rgba(0, 0, 0, 0.12)) var(--slider-progress, 0%),
+    var(--background-modifier-border, rgba(0, 0, 0, 0.12)) 100%
+  );
+  outline: none;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  transition: background 0.05s ease;
+}
+
+.sc-pill-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1.5px solid var(--interactive-accent, #6366f1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.sc-pill-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+}
+
+/* Time text - Guaranteed no cut off */
+.sc-pill-time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 78px;
+  text-align: right;
+  letter-spacing: -0.2px;
+}
+
+/* 6. Trailing Group (Speed & Close) */
+.sc-pill-trailing-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.speech-craft-pill button.sc-pill-speed {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 26px !important;
+  padding: 0 8px !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--background-modifier-border, rgba(0, 0, 0, 0.08)) !important;
+  background: var(--background-primary, rgba(255, 255, 255, 0.9)) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+  color: var(--text-normal) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  font-variant-numeric: tabular-nums !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  transition: transform 0.12s ease, background 0.12s ease !important;
+}
+
+.speech-craft-pill button.sc-pill-speed:hover {
+  background: var(--background-modifier-hover, #ffffff) !important;
+  transform: translateY(-1px) scale(1.04);
+}
+
+.speech-craft-pill button.sc-pill-close {
+  color: var(--text-muted) !important;
+}
+
+.speech-craft-pill button.sc-pill-close:hover {
+  color: var(--text-normal) !important;
+}
+
+/* ==========================================================================
+   Responsive Mobile & Narrow Viewport Layout
+   Top Row: Timeline slider and time inline
+   Bottom Row: All controls (badge, counter, playback, speed, close)
+   ========================================================================== */
+@media (max-width: 640px) {
+  .speech-craft-pill {
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%) translateY(0);
+    width: calc(100vw - 24px);
+    max-width: 440px;
+    height: auto;
+    padding: 10px 14px;
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .speech-craft-pill.hidden {
+    transform: translateX(-50%) translateY(140%);
+  }
+
+  .sc-pill-divider-desktop-1,
+  .sc-pill-divider-desktop-2,
+  .sc-pill-divider {
+    display: none !important;
+  }
+
+  /* Row 1: Timeline track and time inline */
+  .sc-pill-progress-group {
+    order: 1;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .sc-pill-slider {
+    flex: 1;
+    height: 6px;
+  }
+
+  .sc-pill-slider::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+  }
+
+  .sc-pill-time {
+    min-width: 70px;
+    font-size: 11px;
+    text-align: right;
+  }
+
+  /* Row 2: All controls below timeline */
+  .sc-pill-controls-row {
+    order: 2;
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 6px;
+  }
+
+  .sc-pill-badge-group {
+    order: 1;
+    gap: 4px;
+  }
+
+  .sc-pill-controls {
+    order: 2;
+    gap: 4px;
+  }
+
+  .sc-pill-trailing-group {
+    order: 3;
+    gap: 4px;
+  }
+}
+
+/* Also support Obsidian Phone App (.is-phone) */
+body.is-phone .speech-craft-pill {
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  width: calc(100vw - 24px);
+  max-width: 440px;
+  height: auto;
+  padding: 10px 14px;
+  border-radius: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+body.is-phone .speech-craft-pill.hidden {
+  transform: translateX(-50%) translateY(140%);
+}
+
+body.is-phone .sc-pill-divider-desktop-1,
+body.is-phone .sc-pill-divider-desktop-2,
+body.is-phone .sc-pill-divider {
+  display: none !important;
+}
+
+body.is-phone .sc-pill-progress-group {
+  order: 1;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+body.is-phone .sc-pill-slider {
+  flex: 1;
+  height: 6px;
+}
+
+body.is-phone .sc-pill-slider::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+}
+
+body.is-phone .sc-pill-time {
+  min-width: 70px;
+  font-size: 11px;
+  text-align: right;
+}
+
+body.is-phone .sc-pill-controls-row {
+  order: 2;
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 6px;
+}
+
+body.is-phone .sc-pill-badge-group {
+  order: 1;
+  gap: 4px;
+}
+
+body.is-phone .sc-pill-controls {
+  order: 2;
+  gap: 4px;
+}
+
+body.is-phone .sc-pill-trailing-group {
+  order: 3;
+  gap: 4px;
+}
+
+/* 7. Live Karaoke Sentence Highlighting in Obsidian Editor */
+.speech-craft-karaoke-highlight {
+  background-color: rgba(var(--interactive-accent-rgb, 99, 102, 241), 0.18) !important;
+  border-bottom: 2px solid var(--interactive-accent, #6366f1) !important;
+  border-radius: 3px !important;
+  transition: background-color 0.15s ease !important;
+}
+
+/* 8. Clickable Counter & Jump to Paragraph Modal */
+.sc-pill-counter-clickable {
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sc-pill-counter-clickable:hover {
+  background: var(--background-modifier-hover, rgba(255, 255, 255, 0.12));
+  color: var(--text-normal);
+}
+
+.sc-jump-modal {
+  padding: 10px 4px;
+}
+
+.sc-jump-header h2 {
+  margin: 0 0 4px 0;
+}
+
+.sc-jump-direct-row {
+  margin-bottom: 12px;
+}
+
+.sc-jump-search-row {
+  margin-bottom: 12px;
+}
+
+.sc-jump-search-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  font-size: 13px;
+}
+
+.sc-jump-list-container {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+}
+
+.sc-jump-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--background-modifier-border-subtle, rgba(255, 255, 255, 0.05));
+  transition: background 0.12s ease;
+}
+
+.sc-jump-item:last-child {
+  border-bottom: none;
+}
+
+.sc-jump-item:hover {
+  background: var(--background-modifier-hover, rgba(255, 255, 255, 0.08));
+}
+
+.sc-jump-item.is-active {
+  background: rgba(var(--interactive-accent-rgb, 99, 102, 241), 0.15);
+  border-left: 3px solid var(--interactive-accent);
+}
+
+.sc-jump-item-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.sc-jump-item.is-active .sc-jump-item-badge {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent, #ffffff);
+  border-color: var(--interactive-accent);
+}
+
+.sc-jump-item-preview {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.sc-jump-item:hover .sc-jump-item-preview,
+.sc-jump-item.is-active .sc-jump-item-preview {
+  color: var(--text-normal);
+}
+
+.sc-jump-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ==========================================================================
+   Paragraph Hover Play Button (Sleek Circular 20x20 Pill, Top Aligned)
+   ========================================================================== */
+.cm-line {
+  position: relative;
+  overflow: visible !important;
+}
+
+.sc-para-play-btn {
+  position: absolute;
+  left: -28px;
+  top: 2px;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 20px !important;
+  height: 20px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border-radius: 50% !important;
+  border: 1px solid var(--background-modifier-border, rgba(255, 255, 255, 0.14)) !important;
+  background: var(--background-primary, rgba(30, 30, 34, 0.95)) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16) !important;
+  outline: none !important;
+  cursor: pointer !important;
+  color: var(--text-muted) !important;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease, border-color 0.15s ease !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  z-index: 25;
+}
+
+/* Invisible bridge extending hit area to paragraph text so hover never drops */
+.sc-para-play-btn::after {
+  content: "";
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  left: -6px;
+  right: -18px;
+  background: transparent;
+  pointer-events: auto;
+  z-index: -1;
+}
+
+.sc-para-play-btn svg {
+  width: 9px !important;
+  height: 9px !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+  stroke-width: 1.5 !important;
+  margin-left: 1.5px; /* optical center for triangle */
+}
+
+/* On hover over the paragraph line or button, reveal the pill */
+.cm-line:hover .sc-para-play-btn,
+.sc-para-reading-container:hover .sc-para-play-btn,
+.sc-para-play-btn:hover {
+  opacity: 0.85;
+  pointer-events: auto;
+}
+
+/* On direct hover over the play button */
+.sc-para-play-btn:hover {
+  opacity: 1 !important;
+  background: var(--interactive-accent) !important;
+  color: var(--text-on-accent, #ffffff) !important;
+  border-color: var(--interactive-accent) !important;
+  transform: scale(1.12) !important;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28) !important;
+}
+
+/* Reading View Container */
+.sc-para-reading-container {
+  position: relative;
+  overflow: visible !important;
+}
+
+.sc-para-play-btn-reading {
+  position: absolute;
+  left: -28px;
+  top: 2px;
+}
+
+.sc-para-play-btn-reading:hover {
+  transform: scale(1.12) !important;
+}
+

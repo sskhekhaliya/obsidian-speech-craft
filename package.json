@@ -1,0 +1,26 @@
+{
+  "name": "obsidian-speech-craft",
+  "version": "1.0.0",
+  "description": "Smart, natural Text-to-Speech for Obsidian. Context-aware playback, intelligent Hindi & English auto-detection, Edge Neural voices, offline mode, and local server integration.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "check": "tsc --noEmit"
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "tts",
+    "text-to-speech",
+    "speech-craft",
+    "edge-tts",
+    "hindi-tts",
+    "audio-player"
+  ],
+  "author": {
+    "name": "SSKhekhaliya",
+    "url": "https://www.sskhekhaliya.in/"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "speech-craft",
+  "name": "Speech Craft",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Smart, natural Text-to-Speech for Obsidian. Context-aware playback, intelligent Hindi & English auto-detection, Edge Neural voices, offline mode, and local server integration.",
+  "author": "SSKhekhaliya",
+  "authorUrl": "https://www.sskhekhaliya.in/",
+  "fundingUrl": "https://buymeacoffee.com/sskhekhaliya",
+  "isDesktopOnly": false
+}
