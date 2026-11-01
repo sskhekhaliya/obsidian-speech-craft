@@ -2683,7 +2683,7 @@ var SpeechCraftPlugin = class extends import_obsidian9.Plugin {
     this.addRibbonIcon("headphones", "Speech Craft: Read note / selection", () => {
       this.speakActiveContext();
     });
-    this.registerDomEvent(document, "click", (evt) => {
+    this.registerDomEvent(document, "contextmenu", (evt) => {
       if (!evt.altKey) return;
       const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
       if (!view || !view.editor) return;
@@ -2691,8 +2691,20 @@ var SpeechCraftPlugin = class extends import_obsidian9.Plugin {
       if (!editorDom || !editorDom.contains(evt.target)) return;
       evt.preventDefault();
       evt.stopPropagation();
-      const cursor = view.editor.getCursor();
-      const offset = view.editor.posToOffset(cursor);
+      let offset = 0;
+      const cm = view.editor.cm;
+      if (cm && typeof cm.posAtCoords === "function") {
+        const cmPos = cm.posAtCoords({ x: evt.clientX, y: evt.clientY });
+        if (typeof cmPos === "number") {
+          offset = cmPos;
+        } else if (cmPos && typeof cmPos.pos === "number") {
+          offset = cmPos.pos;
+        }
+      }
+      if (!offset) {
+        const cursor = view.editor.getCursor();
+        offset = view.editor.posToOffset(cursor);
+      }
       this.speakFromOffset(offset, view.editor);
     });
     this.registerEvent(

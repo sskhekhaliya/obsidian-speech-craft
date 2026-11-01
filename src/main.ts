@@ -132,8 +132,8 @@ export default class SpeechCraftPlugin extends Plugin {
       this.speakActiveContext();
     });
 
-    // 6. Alt + Click to Read from Any Sentence
-    this.registerDomEvent(document, "click", (evt: MouseEvent) => {
+    // 6. Alt + Right Click to Read from Any Sentence
+    this.registerDomEvent(document, "contextmenu", (evt: MouseEvent) => {
       if (!evt.altKey) return;
 
       const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -146,8 +146,21 @@ export default class SpeechCraftPlugin extends Plugin {
       evt.preventDefault();
       evt.stopPropagation();
 
-      const cursor = view.editor.getCursor();
-      const offset = view.editor.posToOffset(cursor);
+      let offset = 0;
+      const cm = (view.editor as any).cm;
+      if (cm && typeof cm.posAtCoords === "function") {
+        const cmPos = cm.posAtCoords({ x: evt.clientX, y: evt.clientY });
+        if (typeof cmPos === "number") {
+          offset = cmPos;
+        } else if (cmPos && typeof cmPos.pos === "number") {
+          offset = cmPos.pos;
+        }
+      }
+      if (!offset) {
+        const cursor = view.editor.getCursor();
+        offset = view.editor.posToOffset(cursor);
+      }
+
       this.speakFromOffset(offset, view.editor);
     });
 

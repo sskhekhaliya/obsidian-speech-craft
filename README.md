@@ -17,8 +17,8 @@ Featuring ultra-realistic **Microsoft Edge Neural** and **Google Cloud** voices 
   - Automatically identifies Devanagari script and dynamically routes segments to your chosen Hindi or English voice without manual switching.
 - 📖 **Live Karaoke Highlighting & Auto-Scroll**:
   - Softly highlights each sentence in your editor as it speaks and smoothly auto-scrolls the active sentence into center view so you never lose your place.
-- ⚡ **Alt + Click to Read from Any Sentence**:
-  - Hold `Alt` and click anywhere in a sentence to immediately start listening from that exact position without selecting text or pressing buttons.
+- ⚡ **Alt + Right-Click to Read from Any Sentence**:
+  - Hold `Alt` and right-click anywhere in a sentence to immediately start listening from that exact position without selecting text or pressing buttons (leaving `Alt + Left Click` free for Obsidian's native multi-cursor selection).
 - ⏸️ **Smart Auto-Pause on Edit**:
   - When you spot a typo or translation mistake and start typing, speech automatically pauses so you can formulate your correction without audio talking over you.
 - 🔁 **Re-read Current Sentence & Continue (`Alt + Enter`)**:
@@ -43,7 +43,7 @@ Featuring ultra-realistic **Microsoft Edge Neural** and **Google Cloud** voices 
 
 | Command | Recommended Hotkey | Description |
 | :--- | :--- | :--- |
-| **Alt + Click** on any sentence | `Alt + Click` | Starts reading note from that exact sentence |
+| **Alt + Right-Click** on any sentence | `Alt + Right-Click` | Starts reading note from that exact sentence |
 | **Re-read Sentence & Continue** | `Alt + Enter` | Re-reads newly edited sentence & resumes note |
 | **Play / Pause** | `Alt + P` or `Space` | Toggles speech playback |
 | **Previous Sentence** | `Alt + Left` | Moves back one sentence |
