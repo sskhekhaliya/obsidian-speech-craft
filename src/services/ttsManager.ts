@@ -489,6 +489,12 @@ export class TTSManager {
     }
   }
 
+  private isDocumentEdited: boolean = false;
+
+  public markDocumentEdited(): void {
+    this.isDocumentEdited = true;
+  }
+
   pause() {
     if (this.settings.provider === "webspeech") {
       this.webSpeechProvider.pause();
@@ -503,6 +509,14 @@ export class TTSManager {
   }
 
   resume() {
+    if (this.isDocumentEdited) {
+      this.isDocumentEdited = false;
+      if (this.segments.length > 0) {
+        this.playSegment(this.currentSegmentIndex);
+        return;
+      }
+    }
+
     if (this.settings.provider === "webspeech") {
       this.webSpeechProvider.resume();
       this.setState("playing");
@@ -510,7 +524,9 @@ export class TTSManager {
     }
 
     if (this.audio && this.audio.paused && this.audio.src) {
-      this.audio.play();
+      this.audio.play().catch(() => {
+        this.playSegment(this.currentSegmentIndex);
+      });
       this.setState("playing");
     } else if (this.segments.length > 0 && this.state === "idle") {
       this.playSegment(this.currentSegmentIndex);

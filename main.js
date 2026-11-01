@@ -513,6 +513,11 @@ var WebSpeechProvider = class {
     this.name = "Web Speech API (100% Offline)";
     this.cachedVoices = null;
     this.activeUtterance = null;
+    this.currentText = "";
+    this.currentVoiceName = "";
+    this.currentOptions = null;
+    this.lastCharIndex = 0;
+    this.pauseHeartbeat = null;
   }
   async getVoices() {
     if (this.cachedVoices && this.cachedVoices.length > 0) {
@@ -567,7 +572,15 @@ var WebSpeechProvider = class {
       onError?.(new Error("Speech synthesis is not supported on this device"));
       return;
     }
+    this.stopPauseHeartbeat();
     window.speechSynthesis.cancel();
+    this.currentText = text;
+    this.currentVoiceName = voiceName;
+    this.currentOptions = options;
+    this.lastCharIndex = 0;
+    this.onBoundaryCb = onBoundary;
+    this.onEndCb = onEnd;
+    this.onErrorCb = onError;
     const utterance = new SpeechSynthesisUtterance(text);
     this.activeUtterance = utterance;
     const allVoices = window.speechSynthesis.getVoices();
@@ -581,31 +594,78 @@ var WebSpeechProvider = class {
     utterance.volume = Math.max(0, Math.min(options.volume ?? 1, 1));
     if (onBoundary) {
       utterance.onboundary = (e) => {
+        this.lastCharIndex = e.charIndex;
         onBoundary(e.charIndex);
       };
     }
     utterance.onend = () => {
+      this.stopPauseHeartbeat();
       this.activeUtterance = null;
       onEnd?.();
     };
     utterance.onerror = (e) => {
+      this.stopPauseHeartbeat();
       this.activeUtterance = null;
       onError?.(e);
     };
     window.speechSynthesis.speak(utterance);
   }
   pause() {
-    if (window.speechSynthesis?.speaking) {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    if (window.speechSynthesis.speaking) {
       window.speechSynthesis.pause();
+    }
+    this.startPauseHeartbeat();
+  }
+  startPauseHeartbeat() {
+    this.stopPauseHeartbeat();
+    this.pauseHeartbeat = setInterval(() => {
+      if (typeof window !== "undefined" && window.speechSynthesis?.paused) {
+        window.speechSynthesis.resume();
+        window.speechSynthesis.pause();
+      } else {
+        this.stopPauseHeartbeat();
+      }
+    }, 1e4);
+  }
+  stopPauseHeartbeat() {
+    if (this.pauseHeartbeat) {
+      clearInterval(this.pauseHeartbeat);
+      this.pauseHeartbeat = null;
     }
   }
   resume() {
-    if (window.speechSynthesis?.paused) {
+    this.stopPauseHeartbeat();
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    if (window.speechSynthesis.paused) {
       window.speechSynthesis.resume();
     }
+    setTimeout(() => {
+      if (this.activeUtterance && !window.speechSynthesis.speaking) {
+        if (this.currentText && this.currentOptions) {
+          const remainingText = this.currentText.slice(this.lastCharIndex);
+          if (remainingText.trim().length > 0) {
+            const baseOffset = this.lastCharIndex;
+            this.speak(
+              remainingText,
+              this.currentVoiceName,
+              this.currentOptions,
+              (charIdx) => {
+                this.onBoundaryCb?.(baseOffset + charIdx);
+              },
+              this.onEndCb,
+              this.onErrorCb
+            );
+          } else {
+            this.onEndCb?.();
+          }
+        }
+      }
+    }, 250);
   }
   stop() {
-    if (window.speechSynthesis) {
+    this.stopPauseHeartbeat();
+    if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
       this.activeUtterance = null;
     }
@@ -806,6 +866,7 @@ var TTSManager = class {
     this.prefetchQueue = /* @__PURE__ */ new Set();
     this.lastHighlightedSentence = null;
     this.currentSessionId = 0;
+    this.isDocumentEdited = false;
     this.keychainService = keychainService || new KeychainService(app);
     this.googleProvider = new GoogleTtsProvider(() => this.keychainService.getGoogleApiKey(this.settings));
     this.edgeProvider = new EdgeTtsProvider();
@@ -1165,6 +1226,9 @@ var TTSManager = class {
       this.playSegment(this.currentSegmentIndex);
     }
   }
+  markDocumentEdited() {
+    this.isDocumentEdited = true;
+  }
   pause() {
     if (this.settings.provider === "webspeech") {
       this.webSpeechProvider.pause();
@@ -1177,13 +1241,22 @@ var TTSManager = class {
     }
   }
   resume() {
+    if (this.isDocumentEdited) {
+      this.isDocumentEdited = false;
+      if (this.segments.length > 0) {
+        this.playSegment(this.currentSegmentIndex);
+        return;
+      }
+    }
     if (this.settings.provider === "webspeech") {
       this.webSpeechProvider.resume();
       this.setState("playing");
       return;
     }
     if (this.audio && this.audio.paused && this.audio.src) {
-      this.audio.play();
+      this.audio.play().catch(() => {
+        this.playSegment(this.currentSegmentIndex);
+      });
       this.setState("playing");
     } else if (this.segments.length > 0 && this.state === "idle") {
       this.playSegment(this.currentSegmentIndex);
@@ -1462,6 +1535,17 @@ var TextExtractor = class {
     if (!textToRead || textToRead.trim().length === 0) {
       return null;
     }
+    if (settings.skipFrontmatter !== false && (sourceType === "full-note" || baseOffset === 0)) {
+      const fmMatch = textToRead.match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/);
+      if (fmMatch) {
+        const fmLength = fmMatch[0].length;
+        textToRead = textToRead.slice(fmLength);
+        baseOffset += fmLength;
+      }
+    }
+    if (!textToRead || textToRead.trim().length === 0) {
+      return null;
+    }
     const rawBlocks = [];
     const blockRegex = /(?:\r?\n\s*){2,}/g;
     let match;
@@ -1509,7 +1593,7 @@ var TextExtractor = class {
         continue;
       }
       const cleaned = cleanMarkdownForTTS(block.rawText, {
-        skipFrontmatter: false,
+        skipFrontmatter: true,
         skipCodeBlocks: settings.skipCodeBlocks
       });
       if (!cleaned || cleaned.trim().length === 0) {
@@ -1701,15 +1785,26 @@ var PlayerBar = class {
     this.currentSpeedIndex = matchIdx >= 0 ? matchIdx : this.speedOptions.indexOf(1);
     this.updateSpeedText();
   }
+  isBarVisible() {
+    return this.isVisible;
+  }
   show() {
     if (!this.containerEl) return;
     this.containerEl.removeClass("hidden");
+    const changed = !this.isVisible;
     this.isVisible = true;
+    if (changed) {
+      this.onVisibilityChange?.(true);
+    }
   }
   hide() {
     if (!this.containerEl) return;
     this.containerEl.addClass("hidden");
+    const changed = this.isVisible;
     this.isVisible = false;
+    if (changed) {
+      this.onVisibilityChange?.(false);
+    }
   }
   buildUI(el) {
     const progressGroup = el.createDiv({ cls: "sc-pill-progress-group" });
@@ -1842,10 +1937,13 @@ var PlayerBar = class {
     }
   }
   updateStatus(status) {
-    if (status.state === "idle" && !this.isVisible) {
+    if (status.state === "idle") {
+      if (this.isVisible) {
+        this.hide();
+      }
       return;
     }
-    if (status.state !== "idle" && !this.isVisible) {
+    if (!this.isVisible) {
       this.show();
     }
     if (this.playPauseBtn && this.currentState !== status.state) {
@@ -1892,9 +1990,6 @@ var PlayerBar = class {
       const percent = Math.min(100, Math.max(0, status.currentTime / status.duration * 100));
       this.progressSlider.value = percent.toFixed(1);
       this.progressSlider.style.setProperty("--slider-progress", `${percent.toFixed(1)}%`);
-    } else if (this.progressSlider && status.state === "idle") {
-      this.progressSlider.value = "0";
-      this.progressSlider.style.setProperty("--slider-progress", "0%");
     }
   }
 };
@@ -2215,7 +2310,7 @@ var SpeechCraftSettingTab = class extends import_obsidian6.PluginSettingTab {
         await this.plugin.saveSettings();
       });
     });
-    new import_obsidian6.Setting(containerEl).setName("Show Play Icon on Paragraph Hover").setDesc("Display a subtle play icon in the margin when hovering over a paragraph to jump or start reading directly from it.").addToggle((toggle) => {
+    new import_obsidian6.Setting(containerEl).setName("Show Play Icon on Paragraph Hover").setDesc("Display a subtle play icon in the margin when hovering over a paragraph to jump directly from it while the player is active.").addToggle((toggle) => {
       toggle.setValue(this.plugin.settings.showParagraphHoverPlay !== false).onChange(async (val) => {
         this.plugin.settings.showParagraphHoverPlay = val;
         await this.plugin.saveSettings();
@@ -2312,6 +2407,7 @@ var ParagraphPlayWidget = class extends import_view2.WidgetType {
     btn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (!this.plugin.isPlayerActive()) return;
       this.plugin.speakFromOffset(this.pos);
     };
     return btn;
@@ -2518,6 +2614,7 @@ var SpeechCraftPlugin = class extends import_obsidian9.Plugin {
         btn.onclick = (e) => {
           e.preventDefault();
           e.stopPropagation();
+          if (!this.isPlayerActive()) return;
           const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
           if (view && view.editor) {
             const docText = view.editor.getValue();
@@ -2545,6 +2642,9 @@ var SpeechCraftPlugin = class extends import_obsidian9.Plugin {
     this.playerBar.onJumpRequest = () => {
       this.openJumpToParagraphModal();
     };
+    this.playerBar.onVisibilityChange = () => {
+      this.updatePlayerActiveState();
+    };
     this.playerBar.mount(document.body);
     this.statusBarEl = this.addStatusBarItem();
     this.statusBarEl.addClass("speech-craft-status-bar");
@@ -2558,6 +2658,7 @@ var SpeechCraftPlugin = class extends import_obsidian9.Plugin {
       }
     };
     this.ttsManager.onStatusChange((status) => {
+      this.updatePlayerActiveState(status);
       if (this.activePlayingFilePath && status.totalSegments > 0) {
         if (!this.settings.filePositions) {
           this.settings.filePositions = {};
@@ -2596,6 +2697,7 @@ var SpeechCraftPlugin = class extends import_obsidian9.Plugin {
     });
     this.registerEvent(
       this.app.workspace.on("editor-change", (editor) => {
+        this.ttsManager.markDocumentEdited();
         if (this.settings.autoPauseOnEdit && this.ttsManager.getStatus().state === "playing") {
           this.ttsManager.pause();
           new import_obsidian9.Notice("Speech Craft: Auto-paused for editing");
@@ -2736,6 +2838,7 @@ var SpeechCraftPlugin = class extends import_obsidian9.Plugin {
       })
     );
     this.addSettingTab(new SpeechCraftSettingTab(this.app, this));
+    this.updatePlayerActiveState();
   }
   speakActiveContext(editor) {
     const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
@@ -2866,6 +2969,18 @@ var SpeechCraftPlugin = class extends import_obsidian9.Plugin {
       this.saveSettings();
     }, 1e3);
   }
+  isPlayerActive() {
+    const status = this.ttsManager?.getStatus();
+    const isPlaybackActive = status ? status.state !== "idle" : false;
+    const isBarVisible = this.playerBar ? this.playerBar.isBarVisible() : false;
+    return Boolean(isPlaybackActive || isBarVisible);
+  }
+  updatePlayerActiveState(status) {
+    const isPlaybackActive = status ? status.state !== "idle" : this.ttsManager?.getStatus().state !== "idle";
+    const isBarVisible = this.playerBar ? this.playerBar.isBarVisible() : false;
+    const isActive = Boolean(isPlaybackActive || isBarVisible);
+    document.body.classList.toggle("sc-player-active", isActive);
+  }
   onunload() {
     if (this.activeJumpModal) {
       this.activeJumpModal.close();
@@ -2874,6 +2989,7 @@ var SpeechCraftPlugin = class extends import_obsidian9.Plugin {
     this.ttsManager?.stop();
     this.playerBar?.unmount();
     clearHighlightFromActiveView(this.app);
+    document.body.classList.remove("sc-player-active");
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());

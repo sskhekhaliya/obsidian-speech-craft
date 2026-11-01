@@ -56,19 +56,32 @@ export class PlayerBar {
     this.updateSpeedText();
   }
 
+  public onJumpRequest?: () => void;
+  public onVisibilityChange?: (visible: boolean) => void;
+
+  isBarVisible(): boolean {
+    return this.isVisible;
+  }
+
   show() {
     if (!this.containerEl) return;
     this.containerEl.removeClass("hidden");
+    const changed = !this.isVisible;
     this.isVisible = true;
+    if (changed) {
+      this.onVisibilityChange?.(true);
+    }
   }
 
   hide() {
     if (!this.containerEl) return;
     this.containerEl.addClass("hidden");
+    const changed = this.isVisible;
     this.isVisible = false;
+    if (changed) {
+      this.onVisibilityChange?.(false);
+    }
   }
-
-  public onJumpRequest?: () => void;
 
   private buildUI(el: HTMLElement) {
     // 1. Progress Track & Slider + Time (Row 1 on mobile, center section on desktop)
@@ -234,11 +247,14 @@ export class PlayerBar {
   }
 
   private updateStatus(status: AudioPlaybackStatus) {
-    if (status.state === "idle" && !this.isVisible) {
+    if (status.state === "idle") {
+      if (this.isVisible) {
+        this.hide();
+      }
       return;
     }
 
-    if (status.state !== "idle" && !this.isVisible) {
+    if (!this.isVisible) {
       this.show();
     }
 
@@ -294,9 +310,6 @@ export class PlayerBar {
       const percent = Math.min(100, Math.max(0, (status.currentTime / status.duration) * 100));
       this.progressSlider.value = percent.toFixed(1);
       this.progressSlider.style.setProperty("--slider-progress", `${percent.toFixed(1)}%`);
-    } else if (this.progressSlider && status.state === "idle") {
-      this.progressSlider.value = "0";
-      this.progressSlider.style.setProperty("--slider-progress", "0%");
     }
   }
 }

@@ -47,6 +47,20 @@ export class TextExtractor {
       return null;
     }
 
+    // Strip YAML frontmatter at document level if present
+    if (settings.skipFrontmatter !== false && (sourceType === "full-note" || baseOffset === 0)) {
+      const fmMatch = textToRead.match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/);
+      if (fmMatch) {
+        const fmLength = fmMatch[0].length;
+        textToRead = textToRead.slice(fmLength);
+        baseOffset += fmLength;
+      }
+    }
+
+    if (!textToRead || textToRead.trim().length === 0) {
+      return null;
+    }
+
     // 1. Split textToRead into raw blocks by blank lines while tracking EXACT offsets in textToRead
     const rawBlocks: { rawText: string; docFrom: number; docTo: number }[] = [];
     const blockRegex = /(?:\r?\n\s*){2,}/g;
@@ -110,7 +124,7 @@ export class TextExtractor {
 
       // Clean this block for TTS
       const cleaned = cleanMarkdownForTTS(block.rawText, {
-        skipFrontmatter: false,
+        skipFrontmatter: true,
         skipCodeBlocks: settings.skipCodeBlocks
       });
 

@@ -35,6 +35,7 @@ export class ParagraphPlayWidget extends WidgetType {
     btn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (!this.plugin.isPlayerActive()) return;
       this.plugin.speakFromOffset(this.pos);
     };
 

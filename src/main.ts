@@ -51,6 +51,7 @@ export default class SpeechCraftPlugin extends Plugin {
         btn.onclick = (e) => {
           e.preventDefault();
           e.stopPropagation();
+          if (!this.isPlayerActive()) return;
           const view = this.app.workspace.getActiveViewOfType(MarkdownView);
           if (view && view.editor) {
             const docText = view.editor.getValue();
@@ -81,6 +82,9 @@ export default class SpeechCraftPlugin extends Plugin {
     this.playerBar.onJumpRequest = () => {
       this.openJumpToParagraphModal();
     };
+    this.playerBar.onVisibilityChange = () => {
+      this.updatePlayerActiveState();
+    };
     this.playerBar.mount(document.body);
 
     // 4. Status Bar Item
@@ -98,6 +102,8 @@ export default class SpeechCraftPlugin extends Plugin {
 
     // Update status bar on playback state changes & auto-save playback position
     this.ttsManager.onStatusChange((status) => {
+      this.updatePlayerActiveState(status);
+
       if (this.activePlayingFilePath && status.totalSegments > 0) {
         if (!this.settings.filePositions) {
           this.settings.filePositions = {};
@@ -148,6 +154,7 @@ export default class SpeechCraftPlugin extends Plugin {
     // 7. Smart Auto-Pause on Edit
     this.registerEvent(
       this.app.workspace.on("editor-change", (editor: Editor) => {
+        this.ttsManager.markDocumentEdited();
         if (this.settings.autoPauseOnEdit && this.ttsManager.getStatus().state === "playing") {
           this.ttsManager.pause();
           new Notice("Speech Craft: Auto-paused for editing");
@@ -309,6 +316,9 @@ export default class SpeechCraftPlugin extends Plugin {
 
     // 11. Settings Tab
     this.addSettingTab(new SpeechCraftSettingTab(this.app, this));
+
+    // 12. Sync Initial Player Active State
+    this.updatePlayerActiveState();
   }
 
   speakActiveContext(editor?: Editor) {
@@ -467,6 +477,22 @@ export default class SpeechCraftPlugin extends Plugin {
     }, 1000);
   }
 
+  isPlayerActive(): boolean {
+    const status = this.ttsManager?.getStatus();
+    const isPlaybackActive = status ? status.state !== "idle" : false;
+    const isBarVisible = this.playerBar ? this.playerBar.isBarVisible() : false;
+    return Boolean(isPlaybackActive || isBarVisible);
+  }
+
+  updatePlayerActiveState(status?: { state: string }) {
+    const isPlaybackActive = status
+      ? status.state !== "idle"
+      : (this.ttsManager?.getStatus().state !== "idle");
+    const isBarVisible = this.playerBar ? this.playerBar.isBarVisible() : false;
+    const isActive = Boolean(isPlaybackActive || isBarVisible);
+    document.body.classList.toggle("sc-player-active", isActive);
+  }
+
   onunload() {
     if (this.activeJumpModal) {
       this.activeJumpModal.close();
@@ -475,6 +501,7 @@ export default class SpeechCraftPlugin extends Plugin {
     this.ttsManager?.stop();
     this.playerBar?.unmount();
     clearHighlightFromActiveView(this.app);
+    document.body.classList.remove("sc-player-active");
   }
 
   async loadSettings() {

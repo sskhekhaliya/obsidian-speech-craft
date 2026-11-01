@@ -471,7 +471,7 @@ export class SpeechCraftSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Show Play Icon on Paragraph Hover")
-      .setDesc("Display a subtle play icon in the margin when hovering over a paragraph to jump or start reading directly from it.")
+      .setDesc("Display a subtle play icon in the margin when hovering over a paragraph to jump directly from it while the player is active.")
       .addToggle((toggle) => {
         toggle.setValue(this.plugin.settings.showParagraphHoverPlay !== false).onChange(async (val) => {
           this.plugin.settings.showParagraphHoverPlay = val;

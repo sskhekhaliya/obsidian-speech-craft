@@ -7,6 +7,15 @@ export class WebSpeechProvider {
   private cachedVoices: TTSVoice[] | null = null;
   private activeUtterance: SpeechSynthesisUtterance | null = null;
 
+  private currentText: string = "";
+  private currentVoiceName: string = "";
+  private currentOptions: SynthesisOptions | null = null;
+  private lastCharIndex: number = 0;
+  private onBoundaryCb?: (charIndex: number) => void;
+  private onEndCb?: () => void;
+  private onErrorCb?: (err: any) => void;
+  private pauseHeartbeat: any = null;
+
   async getVoices(): Promise<TTSVoice[]> {
     if (this.cachedVoices && this.cachedVoices.length > 0) {
       return this.cachedVoices;
@@ -79,7 +88,16 @@ export class WebSpeechProvider {
       return;
     }
 
+    this.stopPauseHeartbeat();
     window.speechSynthesis.cancel();
+
+    this.currentText = text;
+    this.currentVoiceName = voiceName;
+    this.currentOptions = options;
+    this.lastCharIndex = 0;
+    this.onBoundaryCb = onBoundary;
+    this.onEndCb = onEnd;
+    this.onErrorCb = onError;
 
     const utterance = new SpeechSynthesisUtterance(text);
     this.activeUtterance = utterance;
@@ -97,16 +115,19 @@ export class WebSpeechProvider {
 
     if (onBoundary) {
       utterance.onboundary = (e) => {
+        this.lastCharIndex = e.charIndex;
         onBoundary(e.charIndex);
       };
     }
 
     utterance.onend = () => {
+      this.stopPauseHeartbeat();
       this.activeUtterance = null;
       onEnd?.();
     };
 
     utterance.onerror = (e) => {
+      this.stopPauseHeartbeat();
       this.activeUtterance = null;
       onError?.(e);
     };
@@ -115,19 +136,68 @@ export class WebSpeechProvider {
   }
 
   pause(): void {
-    if (window.speechSynthesis?.speaking) {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    if (window.speechSynthesis.speaking) {
       window.speechSynthesis.pause();
+    }
+    this.startPauseHeartbeat();
+  }
+
+  private startPauseHeartbeat(): void {
+    this.stopPauseHeartbeat();
+    this.pauseHeartbeat = setInterval(() => {
+      if (typeof window !== "undefined" && window.speechSynthesis?.paused) {
+        window.speechSynthesis.resume();
+        window.speechSynthesis.pause();
+      } else {
+        this.stopPauseHeartbeat();
+      }
+    }, 10000);
+  }
+
+  private stopPauseHeartbeat(): void {
+    if (this.pauseHeartbeat) {
+      clearInterval(this.pauseHeartbeat);
+      this.pauseHeartbeat = null;
     }
   }
 
   resume(): void {
-    if (window.speechSynthesis?.paused) {
+    this.stopPauseHeartbeat();
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+
+    if (window.speechSynthesis.paused) {
       window.speechSynthesis.resume();
     }
+
+    // Chromium bug watchdog: If paused for a long time, Chromium may drop the utterance completely
+    setTimeout(() => {
+      if (this.activeUtterance && !window.speechSynthesis.speaking) {
+        if (this.currentText && this.currentOptions) {
+          const remainingText = this.currentText.slice(this.lastCharIndex);
+          if (remainingText.trim().length > 0) {
+            const baseOffset = this.lastCharIndex;
+            this.speak(
+              remainingText,
+              this.currentVoiceName,
+              this.currentOptions,
+              (charIdx) => {
+                this.onBoundaryCb?.(baseOffset + charIdx);
+              },
+              this.onEndCb,
+              this.onErrorCb
+            );
+          } else {
+            this.onEndCb?.();
+          }
+        }
+      }
+    }, 250);
   }
 
   stop(): void {
-    if (window.speechSynthesis) {
+    this.stopPauseHeartbeat();
+    if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
       this.activeUtterance = null;
     }

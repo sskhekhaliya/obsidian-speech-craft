@@ -567,6 +567,7 @@ body.is-phone .sc-pill-trailing-group {
 
 /* ==========================================================================
    Paragraph Hover Play Button (Sleek Circular 20x20 Pill, Top Aligned)
+   Only appears when the player is active (.sc-player-active on body)
    ========================================================================== */
 .cm-line {
   position: relative;
@@ -599,8 +600,15 @@ body.is-phone .sc-pill-trailing-group {
   z-index: 25;
 }
 
-/* Invisible bridge extending hit area to paragraph text so hover never drops */
-.sc-para-play-btn::after {
+/* By default when player is inactive, hide paragraph play buttons completely */
+body:not(.sc-player-active) .sc-para-play-btn {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Invisible bridge extending hit area to paragraph text so hover never drops (only when active) */
+body.sc-player-active .sc-para-play-btn::after {
   content: "";
   position: absolute;
   top: -6px;
@@ -621,16 +629,16 @@ body.is-phone .sc-pill-trailing-group {
   margin-left: 1.5px; /* optical center for triangle */
 }
 
-/* On hover over the paragraph line or button, reveal the pill */
-.cm-line:hover .sc-para-play-btn,
-.sc-para-reading-container:hover .sc-para-play-btn,
-.sc-para-play-btn:hover {
+/* On hover over the paragraph line or button, reveal the pill ONLY when player is active */
+body.sc-player-active .cm-line:hover .sc-para-play-btn,
+body.sc-player-active .sc-para-reading-container:hover .sc-para-play-btn,
+body.sc-player-active .sc-para-play-btn:hover {
   opacity: 0.85;
   pointer-events: auto;
 }
 
-/* On direct hover over the play button */
-.sc-para-play-btn:hover {
+/* On direct hover over the play button (only when active) */
+body.sc-player-active .sc-para-play-btn:hover {
   opacity: 1 !important;
   background: var(--interactive-accent) !important;
   color: var(--text-on-accent, #ffffff) !important;
@@ -651,7 +659,7 @@ body.is-phone .sc-pill-trailing-group {
   top: 2px;
 }
 
-.sc-para-play-btn-reading:hover {
+body.sc-player-active .sc-para-play-btn-reading:hover {
   transform: scale(1.12) !important;
 }
 
