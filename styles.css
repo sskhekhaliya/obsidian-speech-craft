@@ -56,6 +56,22 @@
   line-height: 1.2;
 }
 
+.sc-pill-badge-clickable {
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+}
+
+.sc-pill-badge-clickable:hover {
+  transform: translateY(-1px) scale(1.08);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  filter: brightness(1.08);
+}
+
+.sc-pill-badge-clickable:active {
+  transform: translateY(0) scale(0.95);
+}
+
 .sc-pill-badge:not(.sc-badge-hi) {
   color: var(--interactive-accent, #705df2);
   border-color: var(--background-modifier-border);

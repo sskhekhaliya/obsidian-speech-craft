@@ -40,6 +40,18 @@ export class TTSManager {
   private lastHighlightedSentence: SentenceSpan | null = null;
   private currentSessionId: number = 0;
 
+  // Active playback source & WebSpeech timer tracking
+  private activePlaybackSource: "audio" | "webspeech" | "idle" = "idle";
+  private webSpeechTimer: any = null;
+  private webSpeechElapsed: number = 0;
+  private webSpeechDuration: number = 0;
+  private webSpeechSentences: SentenceSpan[] = [];
+  private webSpeechCurrentSentenceIdx: number = 0;
+  private webSpeechCurrentVoiceId: string = "";
+  private sessionLanguageOverride: "hi" | "en" | null = null;
+  private isSwitchingSegment: boolean = false;
+  private isUserPaused: boolean = false;
+
   constructor(
     private app: App,
     private settings: SpeechCraftSettings,
@@ -66,6 +78,26 @@ export class TTSManager {
     this.audio.ontimeupdate = () => {
       this.updateActiveSentenceHighlight();
       this.notify();
+    };
+
+    this.audio.onloadedmetadata = () => {
+      this.notify();
+    };
+
+    this.audio.ondurationchange = () => {
+      this.notify();
+    };
+
+    this.audio.onplay = () => {
+      if (this.state !== "playing") {
+        this.setState("playing");
+      }
+    };
+
+    this.audio.onpause = () => {
+      if (!this.isSwitchingSegment && !this.isUserPaused && this.state === "playing") {
+        this.setState("paused");
+      }
     };
 
     this.audio.onended = () => {
@@ -142,9 +174,18 @@ export class TTSManager {
     let currentTime = 0;
     let duration = 0;
 
-    if (this.audio && !isNaN(this.audio.duration)) {
+    if (this.activePlaybackSource === "webspeech") {
+      currentTime = this.webSpeechElapsed;
+      duration = this.webSpeechDuration;
+    } else if (this.audio) {
       currentTime = this.audio.currentTime || 0;
-      duration = this.audio.duration || 0;
+      if (isFinite(this.audio.duration) && this.audio.duration > 0) {
+        duration = this.audio.duration;
+      } else if (activeSeg) {
+        // Fallback estimation for Chromium MP3 Blob Infinity / NaN duration bug
+        const effectiveRate = Math.max(0.25, this.settings.rate || 1.0);
+        duration = Math.max(currentTime, activeSeg.cleanText.length / (14 * effectiveRate));
+      }
     }
 
     return {
@@ -177,16 +218,84 @@ export class TTSManager {
       return;
     }
 
+    this.sessionLanguageOverride = null;
     this.stop();
     this.segments = segments;
     this.currentSegmentIndex = 0;
 
     // Start segment 0 immediately
     await this.playSegment(0);
+  }
 
-    // Pre-fetch upcoming segments in parallel for instantaneous transitions
-    this.prefetchSegment(1);
-    this.prefetchSegment(2);
+  async toggleCurrentLanguage(): Promise<void> {
+    if (this.segments.length === 0) return;
+    const segment = this.segments[this.currentSegmentIndex];
+    if (!segment) return;
+
+    // Toggle between 'hi' and 'en'
+    const newLang: "hi" | "en" = segment.lang === "hi" ? "en" : "hi";
+    this.sessionLanguageOverride = newLang;
+
+    // Resolve proper voice ID for current provider
+    let newVoiceId = newLang === "hi" ? this.settings.defaultHindiVoice : this.settings.defaultEnglishVoice;
+    if (this.settings.provider === "edge") {
+      newVoiceId = newLang === "hi" ? "hi-IN-SwaraNeural" : "en-US-JennyNeural";
+    } else if (this.settings.provider === "google") {
+      const hasKey = Boolean(this.keychainService.getGoogleApiKey(this.settings));
+      if (hasKey) {
+        newVoiceId = newLang === "hi" ? "hi-IN-Neural2-A" : "en-US-Neural2-F";
+      } else {
+        newVoiceId = newLang === "hi" ? "hi" : "en";
+      }
+    }
+
+    // Update active segment
+    segment.lang = newLang;
+    segment.voiceId = newVoiceId;
+
+    // Invalidate audio cache for this segment
+    const oldUrl = this.blobUrlCache.get(segment.id);
+    if (oldUrl) {
+      try {
+        URL.revokeObjectURL(oldUrl);
+      } catch {}
+      this.blobUrlCache.delete(segment.id);
+    }
+    delete segment.audioBlob;
+    delete segment.audioUrl;
+
+    // Also update all subsequent segments
+    for (let i = this.currentSegmentIndex + 1; i < this.segments.length; i++) {
+      const nextSeg = this.segments[i];
+      nextSeg.lang = newLang;
+      nextSeg.voiceId = newVoiceId;
+      const nextUrl = this.blobUrlCache.get(nextSeg.id);
+      if (nextUrl) {
+        try {
+          URL.revokeObjectURL(nextUrl);
+        } catch {}
+        this.blobUrlCache.delete(nextSeg.id);
+      }
+      delete nextSeg.audioBlob;
+      delete nextSeg.audioUrl;
+    }
+
+    // Clear and stop existing audio immediately
+    this.isSwitchingSegment = true;
+    if (this.audio) {
+      this.audio.pause();
+      this.audio.removeAttribute("src");
+      this.audio.load();
+    }
+    this.stopWebSpeechTimer();
+    this.webSpeechProvider.stop();
+
+    new Notice(`Speech Craft: Switched language model to ${newLang === "hi" ? "Hindi (HI)" : "English (EN)"}`);
+    this.notify();
+
+    // Replay/synthesize current segment with the new language model immediately!
+    this.isUserPaused = false;
+    await this.playSegment(this.currentSegmentIndex);
   }
 
   private async playSegment(index: number, startRatio: number = 0, explicitSessionId?: number) {
@@ -197,27 +306,46 @@ export class TTSManager {
       return;
     }
 
+    this.isSwitchingSegment = true;
+
     // Immediately stop old audio and web speech
     if (this.audio) {
       this.audio.pause();
     }
+    this.stopWebSpeechTimer();
     this.webSpeechProvider.stop();
 
     this.currentSegmentIndex = index;
     const segment = this.segments[index];
     this.setState("loading");
 
-    // Select voice according to language auto-detection
-    let voiceId = segment.voiceId;
-    if (this.settings.autoDetectLanguage) {
-      voiceId = segment.lang === "hi" ? this.settings.defaultHindiVoice : this.settings.defaultEnglishVoice;
-    } else {
-      voiceId = this.settings.defaultEnglishVoice;
+    if (this.sessionLanguageOverride) {
+      segment.lang = this.sessionLanguageOverride;
     }
+
+    // Select voice according to language auto-detection or session override
+    let voiceId: string = segment.voiceId || (segment.lang === "hi" ? "hi" : "en");
+    if (this.settings.autoDetectLanguage || this.sessionLanguageOverride) {
+      if (segment.lang === "hi") {
+        if (this.settings.provider === "edge" && (!this.settings.defaultHindiVoice || this.settings.defaultHindiVoice === "hi")) {
+          voiceId = "hi-IN-SwaraNeural";
+        } else {
+          voiceId = this.settings.defaultHindiVoice || "hi";
+        }
+      } else {
+        if (this.settings.provider === "edge" && (!this.settings.defaultEnglishVoice || this.settings.defaultEnglishVoice === "en")) {
+          voiceId = "en-US-JennyNeural";
+        } else {
+          voiceId = this.settings.defaultEnglishVoice || "en";
+        }
+      }
+    }
+    segment.voiceId = voiceId;
 
     if (this.settings.provider === "webspeech") {
       if (this.currentSessionId !== sessionId) return;
-      this.playViaWebSpeech(segment, voiceId);
+      this.isSwitchingSegment = false;
+      this.playViaWebSpeech(segment, voiceId, startRatio);
       return;
     }
 
@@ -236,6 +364,7 @@ export class TTSManager {
 
       if (this.currentSessionId !== sessionId) return;
 
+      this.activePlaybackSource = "audio";
       this.audio.src = audioUrl;
       this.audio.playbackRate = this.settings.rate;
       this.audio.volume = this.settings.volume;
@@ -246,7 +375,7 @@ export class TTSManager {
       if (startRatio > 0) {
         const seekToRatio = () => {
           if (this.currentSessionId !== sessionId) return;
-          if (!isNaN(this.audio.duration) && this.audio.duration > 0) {
+          if (isFinite(this.audio.duration) && this.audio.duration > 0) {
             this.audio.currentTime = Math.min(Math.max(0, this.audio.duration - 0.05), startRatio * this.audio.duration);
             this.updateActiveSentenceHighlight();
           }
@@ -260,8 +389,14 @@ export class TTSManager {
 
       if (this.currentSessionId !== sessionId) return;
 
+      if (this.isUserPaused) {
+        this.isSwitchingSegment = false;
+        return;
+      }
+
+      this.isSwitchingSegment = false;
       await this.audio.play();
-      if (this.currentSessionId !== sessionId) {
+      if (this.currentSessionId !== sessionId || this.isUserPaused) {
         this.audio.pause();
         return;
       }
@@ -271,15 +406,19 @@ export class TTSManager {
       // Highlight the active sentence within this paragraph
       this.updateActiveSentenceHighlight();
 
-      // Continuously prefetch subsequent segments
-      this.prefetchSegment(index + 1);
-      this.prefetchSegment(index + 2);
+      // Prefetch next segment with a small delay so Google TTS is not flooded
+      setTimeout(() => {
+        if (this.currentSessionId === sessionId && this.state === "playing") {
+          this.prefetchSegment(index + 1);
+        }
+      }, 500);
     } catch (err: any) {
       if (this.currentSessionId !== sessionId) return;
+      this.isSwitchingSegment = false;
       console.error("Speech Craft Synthesis Error:", err);
       // Fallback to Web Speech if audio playback failed
       try {
-        this.playViaWebSpeech(segment, voiceId);
+        this.playViaWebSpeech(segment, voiceId, startRatio);
       } catch (fallbackErr) {
         new Notice(`Speech Craft Playback Error: ${err.message || err}`);
         this.setState("idle");
@@ -381,11 +520,35 @@ export class TTSManager {
     }
   }
 
-  private playViaWebSpeech(segment: SpeechSegment, voiceId: string) {
-    this.webSpeechProvider.stop();
-    this.setState("playing");
+  private startWebSpeechTimer() {
+    this.stopWebSpeechTimer();
+    this.webSpeechTimer = setInterval(() => {
+      if (this.state === "playing") {
+        if (this.webSpeechDuration > 0) {
+          this.webSpeechElapsed = Math.min(this.webSpeechDuration, this.webSpeechElapsed + 0.2);
+        }
+        this.notify();
+      }
+    }, 200);
+  }
 
-    const sentencesToSpeak =
+  private stopWebSpeechTimer() {
+    if (this.webSpeechTimer) {
+      clearInterval(this.webSpeechTimer);
+      this.webSpeechTimer = null;
+    }
+  }
+
+  private playViaWebSpeech(segment: SpeechSegment, voiceId: string, startRatio: number = 0) {
+    this.activePlaybackSource = "webspeech";
+    if (this.audio) {
+      this.audio.pause();
+    }
+    this.webSpeechProvider.stop();
+    this.stopWebSpeechTimer();
+
+    this.webSpeechCurrentVoiceId = voiceId;
+    this.webSpeechSentences =
       segment.sentences && segment.sentences.length > 0
         ? segment.sentences
         : [
@@ -400,13 +563,30 @@ export class TTSManager {
             }
           ];
 
-    let sIdx = 0;
+    const effectiveRate = Math.max(0.25, this.settings.rate || 1.0);
+    this.webSpeechDuration = Math.max(1, segment.cleanText.length / (15 * effectiveRate));
+    this.webSpeechElapsed = startRatio > 0 ? startRatio * this.webSpeechDuration : 0;
 
-    const speakNextSentence = () => {
+    let startIdx = 0;
+    if (startRatio > 0) {
+      for (let i = 0; i < this.webSpeechSentences.length; i++) {
+        if (startRatio >= this.webSpeechSentences[i].startRatio) {
+          startIdx = i;
+        } else {
+          break;
+        }
+      }
+    }
+    this.webSpeechCurrentSentenceIdx = startIdx;
+
+    this.setState("playing");
+    this.startWebSpeechTimer();
+
+    const speakSentenceAt = (idx: number) => {
       if (this.state !== "playing") return;
 
-      if (sIdx >= sentencesToSpeak.length) {
-        // onEnd of all sentences in segment -> advance to next segment
+      if (idx >= this.webSpeechSentences.length) {
+        this.stopWebSpeechTimer();
         if (this.currentSegmentIndex + 1 < this.segments.length) {
           this.playSegment(this.currentSegmentIndex + 1);
         } else {
@@ -416,19 +596,20 @@ export class TTSManager {
         return;
       }
 
-      const currentSpan = sentencesToSpeak[sIdx];
-      sIdx++;
+      this.webSpeechCurrentSentenceIdx = idx;
+      const span = this.webSpeechSentences[idx];
+      this.webSpeechElapsed = span.startRatio * this.webSpeechDuration;
 
       if (
         this.settings.highlightActiveSentence !== false &&
-        currentSpan.docFrom !== undefined &&
-        currentSpan.docTo !== undefined
+        span.docFrom !== undefined &&
+        span.docTo !== undefined
       ) {
-        applyHighlightToActiveView(this.app, currentSpan.docFrom, currentSpan.docTo);
+        applyHighlightToActiveView(this.app, span.docFrom, span.docTo);
       }
 
       this.webSpeechProvider.speak(
-        currentSpan.cleanText || currentSpan.text,
+        span.cleanText || span.text,
         voiceId,
         {
           rate: this.settings.rate,
@@ -437,20 +618,24 @@ export class TTSManager {
         },
         undefined,
         () => {
-          speakNextSentence();
+          if (this.state === "playing") {
+            speakSentenceAt(idx + 1);
+          }
         },
         (err) => {
           console.error("Speech Craft WebSpeech Error:", err);
-          if (sIdx < sentencesToSpeak.length) {
-            speakNextSentence();
-          } else {
-            this.stop();
+          if (this.state === "playing") {
+            if (idx + 1 < this.webSpeechSentences.length) {
+              speakSentenceAt(idx + 1);
+            } else {
+              this.stop();
+            }
           }
         }
       );
     };
 
-    speakNextSentence();
+    speakSentenceAt(this.webSpeechCurrentSentenceIdx);
   }
 
   async startPlaybackFromIndex(segments: SpeechSegment[], index: number) {
@@ -466,19 +651,25 @@ export class TTSManager {
     if (this.audio) {
       this.audio.pause();
     }
+    this.stopWebSpeechTimer();
     this.webSpeechProvider.stop();
 
     this.segments = segments;
     const targetIdx = Math.max(0, Math.min(index, segments.length - 1));
     await this.playSegment(targetIdx, startRatio, sessionId);
     if (this.currentSessionId === sessionId) {
-      this.prefetchSegment(targetIdx + 1);
-      this.prefetchSegment(targetIdx + 2);
+      setTimeout(() => {
+        if (this.currentSessionId === sessionId && this.state === "playing") {
+          this.prefetchSegment(targetIdx + 1);
+        }
+      }, 500);
     }
   }
 
   replayCurrentSegment() {
-    if (this.audio && !isNaN(this.audio.duration)) {
+    if (this.activePlaybackSource === "webspeech") {
+      this.playViaWebSpeech(this.segments[this.currentSegmentIndex], this.webSpeechCurrentVoiceId, 0);
+    } else if (this.audio && isFinite(this.audio.duration)) {
       this.audio.currentTime = 0;
       if (this.audio.paused) {
         this.audio.play();
@@ -496,19 +687,22 @@ export class TTSManager {
   }
 
   pause() {
-    if (this.settings.provider === "webspeech") {
+    this.isUserPaused = true;
+    if (this.activePlaybackSource === "webspeech") {
+      this.stopWebSpeechTimer();
       this.webSpeechProvider.pause();
       this.setState("paused");
       return;
     }
 
-    if (this.audio && !this.audio.paused) {
+    if (this.audio) {
       this.audio.pause();
       this.setState("paused");
     }
   }
 
   resume() {
+    this.isUserPaused = false;
     if (this.isDocumentEdited) {
       this.isDocumentEdited = false;
       if (this.segments.length > 0) {
@@ -517,9 +711,23 @@ export class TTSManager {
       }
     }
 
-    if (this.settings.provider === "webspeech") {
-      this.webSpeechProvider.resume();
+    if (this.activePlaybackSource === "webspeech") {
       this.setState("playing");
+      this.startWebSpeechTimer();
+      if (
+        this.webSpeechSentences &&
+        this.webSpeechCurrentSentenceIdx < this.webSpeechSentences.length
+      ) {
+        const span = this.webSpeechSentences[this.webSpeechCurrentSentenceIdx];
+        if (
+          this.settings.highlightActiveSentence !== false &&
+          span?.docFrom !== undefined &&
+          span?.docTo !== undefined
+        ) {
+          applyHighlightToActiveView(this.app, span.docFrom, span.docTo);
+        }
+      }
+      this.webSpeechProvider.resume();
       return;
     }
 
@@ -534,7 +742,7 @@ export class TTSManager {
   }
 
   togglePlayPause() {
-    if (this.state === "playing") {
+    if (this.state === "playing" || this.state === "loading") {
       this.pause();
     } else if (this.state === "paused") {
       this.resume();
@@ -545,6 +753,10 @@ export class TTSManager {
 
   stop() {
     this.currentSessionId++;
+    this.stopWebSpeechTimer();
+    this.activePlaybackSource = "idle";
+    this.webSpeechElapsed = 0;
+    this.webSpeechDuration = 0;
     this.lastHighlightedSentence = null;
     clearHighlightFromActiveView(this.app);
     if (this.audio) {
@@ -682,7 +894,15 @@ export class TTSManager {
   }
 
   seek(seconds: number) {
-    if (this.audio && !isNaN(this.audio.duration)) {
+    if (this.activePlaybackSource === "webspeech") {
+      if (this.webSpeechDuration > 0) {
+        const ratio = Math.max(0, Math.min(1, seconds / this.webSpeechDuration));
+        this.playSegment(this.currentSegmentIndex, ratio);
+      }
+      return;
+    }
+
+    if (this.audio && isFinite(this.audio.duration) && this.audio.duration > 0) {
       this.audio.currentTime = Math.max(0, Math.min(seconds, this.audio.duration));
       this.notify();
     }

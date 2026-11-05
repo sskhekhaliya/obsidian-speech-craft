@@ -220,18 +220,35 @@ export class GoogleTtsProvider implements TTSProvider {
 
       const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=${targetLang}&client=tw-ob`;
 
-      const response = await requestUrl({
-        url,
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      let response;
+      try {
+        response = await requestUrl({
+          url,
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          }
+        });
+      } catch (reqErr: any) {
+        if (reqErr?.status === 429 || reqErr?.message?.includes("429")) {
+          // Subtle backoff retry if Google rate limits
+          await new Promise((r) => setTimeout(r, 600));
+          response = await requestUrl({
+            url,
+            headers: {
+              "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+          });
+        } else {
+          throw reqErr;
         }
-      });
+      }
 
-      if (response.status === 200 && response.arrayBuffer && response.arrayBuffer.byteLength > 0) {
+      if (response && response.status === 200 && response.arrayBuffer && response.arrayBuffer.byteLength > 0) {
         audioBuffers.push(response.arrayBuffer);
       } else {
-        throw new Error(`Google Free TTS returned HTTP ${response.status}`);
+        throw new Error(`Google Free TTS returned HTTP ${response?.status || "error"}`);
       }
     }
 

@@ -11,6 +11,7 @@ export class WebSpeechProvider {
   private currentVoiceName: string = "";
   private currentOptions: SynthesisOptions | null = null;
   private lastCharIndex: number = 0;
+  private isPaused: boolean = false;
   private onBoundaryCb?: (charIndex: number) => void;
   private onEndCb?: () => void;
   private onErrorCb?: (err: any) => void;
@@ -103,10 +104,28 @@ export class WebSpeechProvider {
     this.activeUtterance = utterance;
 
     const allVoices = window.speechSynthesis.getVoices();
-    const matchedVoice = allVoices.find((v) => v.name === voiceName || v.voiceURI === voiceName);
+    let matchedVoice = allVoices.find((v) => v.name === voiceName || v.voiceURI === voiceName);
+    if (!matchedVoice && (voiceName === "hi" || options.lang?.startsWith("hi"))) {
+      matchedVoice = allVoices.find(
+        (v) =>
+          v.lang.toLowerCase().startsWith("hi") ||
+          v.lang.toLowerCase().startsWith("mr") ||
+          v.lang.toLowerCase().startsWith("gu")
+      );
+    }
+    if (!matchedVoice && (voiceName === "en" || options.lang?.startsWith("en"))) {
+      matchedVoice = allVoices.find((v) => v.lang.toLowerCase().startsWith("en"));
+    }
+
     if (matchedVoice) {
       utterance.voice = matchedVoice;
       utterance.lang = matchedVoice.lang;
+    } else if (options.lang) {
+      utterance.lang = options.lang;
+    } else if (voiceName === "hi") {
+      utterance.lang = "hi-IN";
+    } else if (voiceName === "en") {
+      utterance.lang = "en-US";
     }
 
     utterance.rate = Math.max(0.1, Math.min(options.rate, 2.5));
@@ -123,36 +142,34 @@ export class WebSpeechProvider {
     utterance.onend = () => {
       this.stopPauseHeartbeat();
       this.activeUtterance = null;
+      if (this.isPaused) return;
       onEnd?.();
     };
 
-    utterance.onerror = (e) => {
+    utterance.onerror = (e: any) => {
       this.stopPauseHeartbeat();
       this.activeUtterance = null;
+      if (this.isPaused || e?.error === "canceled" || e?.error === "interrupted") return;
       onError?.(e);
     };
 
+    this.isPaused = false;
     window.speechSynthesis.speak(utterance);
   }
 
   pause(): void {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
-    if (window.speechSynthesis.speaking) {
-      window.speechSynthesis.pause();
+    this.isPaused = true;
+    this.stopPauseHeartbeat();
+    if (this.currentText && this.lastCharIndex > 0) {
+      this.currentText = this.currentText.slice(this.lastCharIndex).trimStart();
+      this.lastCharIndex = 0;
     }
-    this.startPauseHeartbeat();
+    window.speechSynthesis.cancel();
   }
 
   private startPauseHeartbeat(): void {
     this.stopPauseHeartbeat();
-    this.pauseHeartbeat = setInterval(() => {
-      if (typeof window !== "undefined" && window.speechSynthesis?.paused) {
-        window.speechSynthesis.resume();
-        window.speechSynthesis.pause();
-      } else {
-        this.stopPauseHeartbeat();
-      }
-    }, 10000);
   }
 
   private stopPauseHeartbeat(): void {
@@ -165,37 +182,26 @@ export class WebSpeechProvider {
   resume(): void {
     this.stopPauseHeartbeat();
     if (typeof window === "undefined" || !window.speechSynthesis) return;
+    this.isPaused = false;
 
-    if (window.speechSynthesis.paused) {
-      window.speechSynthesis.resume();
+    if (this.currentText && this.currentText.trim().length > 0 && this.currentOptions) {
+      this.speak(
+        this.currentText,
+        this.currentVoiceName,
+        this.currentOptions,
+        this.onBoundaryCb,
+        this.onEndCb,
+        this.onErrorCb
+      );
+    } else {
+      this.onEndCb?.();
     }
-
-    // Chromium bug watchdog: If paused for a long time, Chromium may drop the utterance completely
-    setTimeout(() => {
-      if (this.activeUtterance && !window.speechSynthesis.speaking) {
-        if (this.currentText && this.currentOptions) {
-          const remainingText = this.currentText.slice(this.lastCharIndex);
-          if (remainingText.trim().length > 0) {
-            const baseOffset = this.lastCharIndex;
-            this.speak(
-              remainingText,
-              this.currentVoiceName,
-              this.currentOptions,
-              (charIdx) => {
-                this.onBoundaryCb?.(baseOffset + charIdx);
-              },
-              this.onEndCb,
-              this.onErrorCb
-            );
-          } else {
-            this.onEndCb?.();
-          }
-        }
-      }
-    }, 250);
   }
 
   stop(): void {
+    this.isPaused = false;
+    this.currentText = "";
+    this.lastCharIndex = 0;
     this.stopPauseHeartbeat();
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();

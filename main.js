@@ -237,8 +237,14 @@ Path:speech.config\r
         escapedText = escapedText.replace(/;(\s*)/g, '; <break strength="weak"/>$1');
         escapedText = escapedText.replace(/([—–]|\s--\s)/g, ' <break strength="weak"/> ');
         escapedText = escapedText.replace(/([।॥])(\s*)/g, '$1 <break strength="medium"/>$2');
-        const lang = options.lang || (voiceId.startsWith("hi") ? "hi-IN" : "en-US");
-        const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="${lang}"><voice name="${voiceId}"><prosody pitch="${pitchStr}" rate="${rateStr}" volume="${volumeStr}">${escapedText}</prosody></voice></speak>`;
+        let resolvedVoice = voiceId;
+        if (resolvedVoice === "hi" || resolvedVoice.startsWith("hi-IN") && !resolvedVoice.includes("Neural")) {
+          resolvedVoice = "hi-IN-SwaraNeural";
+        } else if (resolvedVoice === "en" || resolvedVoice.startsWith("en-US") && !resolvedVoice.includes("Neural")) {
+          resolvedVoice = "en-US-JennyNeural";
+        }
+        const lang = options.lang || (resolvedVoice.startsWith("hi") ? "hi-IN" : "en-US");
+        const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="${lang}"><voice name="${resolvedVoice}"><prosody pitch="${pitchStr}" rate="${rateStr}" volume="${volumeStr}">${escapedText}</prosody></voice></speak>`;
         const ssmlMsg = `X-RequestId:${requestId}\r
 Content-Type:application/ssml+xml\r
 X-Timestamp:${dateStr}\r
@@ -450,16 +456,31 @@ var GoogleTtsProvider = class {
         await new Promise((r) => setTimeout(r, 60));
       }
       const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=${targetLang}&client=tw-ob`;
-      const response = await (0, import_obsidian.requestUrl)({
-        url,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      let response;
+      try {
+        response = await (0, import_obsidian.requestUrl)({
+          url,
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          }
+        });
+      } catch (reqErr) {
+        if (reqErr?.status === 429 || reqErr?.message?.includes("429")) {
+          await new Promise((r) => setTimeout(r, 600));
+          response = await (0, import_obsidian.requestUrl)({
+            url,
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+          });
+        } else {
+          throw reqErr;
         }
-      });
-      if (response.status === 200 && response.arrayBuffer && response.arrayBuffer.byteLength > 0) {
+      }
+      if (response && response.status === 200 && response.arrayBuffer && response.arrayBuffer.byteLength > 0) {
         audioBuffers.push(response.arrayBuffer);
       } else {
-        throw new Error(`Google Free TTS returned HTTP ${response.status}`);
+        throw new Error(`Google Free TTS returned HTTP ${response?.status || "error"}`);
       }
     }
     if (audioBuffers.length === 0) {
@@ -517,6 +538,7 @@ var WebSpeechProvider = class {
     this.currentVoiceName = "";
     this.currentOptions = null;
     this.lastCharIndex = 0;
+    this.isPaused = false;
     this.pauseHeartbeat = null;
   }
   async getVoices() {
@@ -584,10 +606,24 @@ var WebSpeechProvider = class {
     const utterance = new SpeechSynthesisUtterance(text);
     this.activeUtterance = utterance;
     const allVoices = window.speechSynthesis.getVoices();
-    const matchedVoice = allVoices.find((v) => v.name === voiceName || v.voiceURI === voiceName);
+    let matchedVoice = allVoices.find((v) => v.name === voiceName || v.voiceURI === voiceName);
+    if (!matchedVoice && (voiceName === "hi" || options.lang?.startsWith("hi"))) {
+      matchedVoice = allVoices.find(
+        (v) => v.lang.toLowerCase().startsWith("hi") || v.lang.toLowerCase().startsWith("mr") || v.lang.toLowerCase().startsWith("gu")
+      );
+    }
+    if (!matchedVoice && (voiceName === "en" || options.lang?.startsWith("en"))) {
+      matchedVoice = allVoices.find((v) => v.lang.toLowerCase().startsWith("en"));
+    }
     if (matchedVoice) {
       utterance.voice = matchedVoice;
       utterance.lang = matchedVoice.lang;
+    } else if (options.lang) {
+      utterance.lang = options.lang;
+    } else if (voiceName === "hi") {
+      utterance.lang = "hi-IN";
+    } else if (voiceName === "en") {
+      utterance.lang = "en-US";
     }
     utterance.rate = Math.max(0.1, Math.min(options.rate, 2.5));
     utterance.pitch = Math.max(0, Math.min(1 + (options.pitch || 0) / 50, 2));
@@ -601,32 +637,30 @@ var WebSpeechProvider = class {
     utterance.onend = () => {
       this.stopPauseHeartbeat();
       this.activeUtterance = null;
+      if (this.isPaused) return;
       onEnd?.();
     };
     utterance.onerror = (e) => {
       this.stopPauseHeartbeat();
       this.activeUtterance = null;
+      if (this.isPaused || e?.error === "canceled" || e?.error === "interrupted") return;
       onError?.(e);
     };
+    this.isPaused = false;
     window.speechSynthesis.speak(utterance);
   }
   pause() {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
-    if (window.speechSynthesis.speaking) {
-      window.speechSynthesis.pause();
+    this.isPaused = true;
+    this.stopPauseHeartbeat();
+    if (this.currentText && this.lastCharIndex > 0) {
+      this.currentText = this.currentText.slice(this.lastCharIndex).trimStart();
+      this.lastCharIndex = 0;
     }
-    this.startPauseHeartbeat();
+    window.speechSynthesis.cancel();
   }
   startPauseHeartbeat() {
     this.stopPauseHeartbeat();
-    this.pauseHeartbeat = setInterval(() => {
-      if (typeof window !== "undefined" && window.speechSynthesis?.paused) {
-        window.speechSynthesis.resume();
-        window.speechSynthesis.pause();
-      } else {
-        this.stopPauseHeartbeat();
-      }
-    }, 1e4);
   }
   stopPauseHeartbeat() {
     if (this.pauseHeartbeat) {
@@ -637,33 +671,24 @@ var WebSpeechProvider = class {
   resume() {
     this.stopPauseHeartbeat();
     if (typeof window === "undefined" || !window.speechSynthesis) return;
-    if (window.speechSynthesis.paused) {
-      window.speechSynthesis.resume();
+    this.isPaused = false;
+    if (this.currentText && this.currentText.trim().length > 0 && this.currentOptions) {
+      this.speak(
+        this.currentText,
+        this.currentVoiceName,
+        this.currentOptions,
+        this.onBoundaryCb,
+        this.onEndCb,
+        this.onErrorCb
+      );
+    } else {
+      this.onEndCb?.();
     }
-    setTimeout(() => {
-      if (this.activeUtterance && !window.speechSynthesis.speaking) {
-        if (this.currentText && this.currentOptions) {
-          const remainingText = this.currentText.slice(this.lastCharIndex);
-          if (remainingText.trim().length > 0) {
-            const baseOffset = this.lastCharIndex;
-            this.speak(
-              remainingText,
-              this.currentVoiceName,
-              this.currentOptions,
-              (charIdx) => {
-                this.onBoundaryCb?.(baseOffset + charIdx);
-              },
-              this.onEndCb,
-              this.onErrorCb
-            );
-          } else {
-            this.onEndCb?.();
-          }
-        }
-      }
-    }, 250);
   }
   stop() {
+    this.isPaused = false;
+    this.currentText = "";
+    this.lastCharIndex = 0;
     this.stopPauseHeartbeat();
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
@@ -866,6 +891,17 @@ var TTSManager = class {
     this.prefetchQueue = /* @__PURE__ */ new Set();
     this.lastHighlightedSentence = null;
     this.currentSessionId = 0;
+    // Active playback source & WebSpeech timer tracking
+    this.activePlaybackSource = "idle";
+    this.webSpeechTimer = null;
+    this.webSpeechElapsed = 0;
+    this.webSpeechDuration = 0;
+    this.webSpeechSentences = [];
+    this.webSpeechCurrentSentenceIdx = 0;
+    this.webSpeechCurrentVoiceId = "";
+    this.sessionLanguageOverride = null;
+    this.isSwitchingSegment = false;
+    this.isUserPaused = false;
     this.isDocumentEdited = false;
     this.keychainService = keychainService || new KeychainService(app);
     this.googleProvider = new GoogleTtsProvider(() => this.keychainService.getGoogleApiKey(this.settings));
@@ -885,6 +921,22 @@ var TTSManager = class {
     this.audio.ontimeupdate = () => {
       this.updateActiveSentenceHighlight();
       this.notify();
+    };
+    this.audio.onloadedmetadata = () => {
+      this.notify();
+    };
+    this.audio.ondurationchange = () => {
+      this.notify();
+    };
+    this.audio.onplay = () => {
+      if (this.state !== "playing") {
+        this.setState("playing");
+      }
+    };
+    this.audio.onpause = () => {
+      if (!this.isSwitchingSegment && !this.isUserPaused && this.state === "playing") {
+        this.setState("paused");
+      }
     };
     this.audio.onended = () => {
       if (this.currentSegmentIndex + 1 < this.segments.length) {
@@ -947,9 +999,17 @@ var TTSManager = class {
     const activeSeg = this.segments[this.currentSegmentIndex];
     let currentTime = 0;
     let duration = 0;
-    if (this.audio && !isNaN(this.audio.duration)) {
+    if (this.activePlaybackSource === "webspeech") {
+      currentTime = this.webSpeechElapsed;
+      duration = this.webSpeechDuration;
+    } else if (this.audio) {
       currentTime = this.audio.currentTime || 0;
-      duration = this.audio.duration || 0;
+      if (isFinite(this.audio.duration) && this.audio.duration > 0) {
+        duration = this.audio.duration;
+      } else if (activeSeg) {
+        const effectiveRate = Math.max(0.25, this.settings.rate || 1);
+        duration = Math.max(currentTime, activeSeg.cleanText.length / (14 * effectiveRate));
+      }
     }
     return {
       state: this.state,
@@ -978,12 +1038,68 @@ var TTSManager = class {
       new import_obsidian3.Notice("Speech Craft: No text to speak");
       return;
     }
+    this.sessionLanguageOverride = null;
     this.stop();
     this.segments = segments;
     this.currentSegmentIndex = 0;
     await this.playSegment(0);
-    this.prefetchSegment(1);
-    this.prefetchSegment(2);
+  }
+  async toggleCurrentLanguage() {
+    if (this.segments.length === 0) return;
+    const segment = this.segments[this.currentSegmentIndex];
+    if (!segment) return;
+    const newLang = segment.lang === "hi" ? "en" : "hi";
+    this.sessionLanguageOverride = newLang;
+    let newVoiceId = newLang === "hi" ? this.settings.defaultHindiVoice : this.settings.defaultEnglishVoice;
+    if (this.settings.provider === "edge") {
+      newVoiceId = newLang === "hi" ? "hi-IN-SwaraNeural" : "en-US-JennyNeural";
+    } else if (this.settings.provider === "google") {
+      const hasKey = Boolean(this.keychainService.getGoogleApiKey(this.settings));
+      if (hasKey) {
+        newVoiceId = newLang === "hi" ? "hi-IN-Neural2-A" : "en-US-Neural2-F";
+      } else {
+        newVoiceId = newLang === "hi" ? "hi" : "en";
+      }
+    }
+    segment.lang = newLang;
+    segment.voiceId = newVoiceId;
+    const oldUrl = this.blobUrlCache.get(segment.id);
+    if (oldUrl) {
+      try {
+        URL.revokeObjectURL(oldUrl);
+      } catch {
+      }
+      this.blobUrlCache.delete(segment.id);
+    }
+    delete segment.audioBlob;
+    delete segment.audioUrl;
+    for (let i = this.currentSegmentIndex + 1; i < this.segments.length; i++) {
+      const nextSeg = this.segments[i];
+      nextSeg.lang = newLang;
+      nextSeg.voiceId = newVoiceId;
+      const nextUrl = this.blobUrlCache.get(nextSeg.id);
+      if (nextUrl) {
+        try {
+          URL.revokeObjectURL(nextUrl);
+        } catch {
+        }
+        this.blobUrlCache.delete(nextSeg.id);
+      }
+      delete nextSeg.audioBlob;
+      delete nextSeg.audioUrl;
+    }
+    this.isSwitchingSegment = true;
+    if (this.audio) {
+      this.audio.pause();
+      this.audio.removeAttribute("src");
+      this.audio.load();
+    }
+    this.stopWebSpeechTimer();
+    this.webSpeechProvider.stop();
+    new import_obsidian3.Notice(`Speech Craft: Switched language model to ${newLang === "hi" ? "Hindi (HI)" : "English (EN)"}`);
+    this.notify();
+    this.isUserPaused = false;
+    await this.playSegment(this.currentSegmentIndex);
   }
   async playSegment(index, startRatio = 0, explicitSessionId) {
     const sessionId = explicitSessionId !== void 0 ? explicitSessionId : ++this.currentSessionId;
@@ -991,22 +1107,39 @@ var TTSManager = class {
       this.stop();
       return;
     }
+    this.isSwitchingSegment = true;
     if (this.audio) {
       this.audio.pause();
     }
+    this.stopWebSpeechTimer();
     this.webSpeechProvider.stop();
     this.currentSegmentIndex = index;
     const segment = this.segments[index];
     this.setState("loading");
-    let voiceId = segment.voiceId;
-    if (this.settings.autoDetectLanguage) {
-      voiceId = segment.lang === "hi" ? this.settings.defaultHindiVoice : this.settings.defaultEnglishVoice;
-    } else {
-      voiceId = this.settings.defaultEnglishVoice;
+    if (this.sessionLanguageOverride) {
+      segment.lang = this.sessionLanguageOverride;
     }
+    let voiceId = segment.voiceId || (segment.lang === "hi" ? "hi" : "en");
+    if (this.settings.autoDetectLanguage || this.sessionLanguageOverride) {
+      if (segment.lang === "hi") {
+        if (this.settings.provider === "edge" && (!this.settings.defaultHindiVoice || this.settings.defaultHindiVoice === "hi")) {
+          voiceId = "hi-IN-SwaraNeural";
+        } else {
+          voiceId = this.settings.defaultHindiVoice || "hi";
+        }
+      } else {
+        if (this.settings.provider === "edge" && (!this.settings.defaultEnglishVoice || this.settings.defaultEnglishVoice === "en")) {
+          voiceId = "en-US-JennyNeural";
+        } else {
+          voiceId = this.settings.defaultEnglishVoice || "en";
+        }
+      }
+    }
+    segment.voiceId = voiceId;
     if (this.settings.provider === "webspeech") {
       if (this.currentSessionId !== sessionId) return;
-      this.playViaWebSpeech(segment, voiceId);
+      this.isSwitchingSegment = false;
+      this.playViaWebSpeech(segment, voiceId, startRatio);
       return;
     }
     try {
@@ -1020,6 +1153,7 @@ var TTSManager = class {
         segment.audioUrl = audioUrl;
       }
       if (this.currentSessionId !== sessionId) return;
+      this.activePlaybackSource = "audio";
       this.audio.src = audioUrl;
       this.audio.playbackRate = this.settings.rate;
       this.audio.volume = this.settings.volume;
@@ -1028,7 +1162,7 @@ var TTSManager = class {
       if (startRatio > 0) {
         const seekToRatio = () => {
           if (this.currentSessionId !== sessionId) return;
-          if (!isNaN(this.audio.duration) && this.audio.duration > 0) {
+          if (isFinite(this.audio.duration) && this.audio.duration > 0) {
             this.audio.currentTime = Math.min(Math.max(0, this.audio.duration - 0.05), startRatio * this.audio.duration);
             this.updateActiveSentenceHighlight();
           }
@@ -1040,20 +1174,29 @@ var TTSManager = class {
         }
       }
       if (this.currentSessionId !== sessionId) return;
+      if (this.isUserPaused) {
+        this.isSwitchingSegment = false;
+        return;
+      }
+      this.isSwitchingSegment = false;
       await this.audio.play();
-      if (this.currentSessionId !== sessionId) {
+      if (this.currentSessionId !== sessionId || this.isUserPaused) {
         this.audio.pause();
         return;
       }
       this.setState("playing");
       this.updateActiveSentenceHighlight();
-      this.prefetchSegment(index + 1);
-      this.prefetchSegment(index + 2);
+      setTimeout(() => {
+        if (this.currentSessionId === sessionId && this.state === "playing") {
+          this.prefetchSegment(index + 1);
+        }
+      }, 500);
     } catch (err) {
       if (this.currentSessionId !== sessionId) return;
+      this.isSwitchingSegment = false;
       console.error("Speech Craft Synthesis Error:", err);
       try {
-        this.playViaWebSpeech(segment, voiceId);
+        this.playViaWebSpeech(segment, voiceId, startRatio);
       } catch (fallbackErr) {
         new import_obsidian3.Notice(`Speech Craft Playback Error: ${err.message || err}`);
         this.setState("idle");
@@ -1140,10 +1283,32 @@ var TTSManager = class {
         return this.googleProvider;
     }
   }
-  playViaWebSpeech(segment, voiceId) {
+  startWebSpeechTimer() {
+    this.stopWebSpeechTimer();
+    this.webSpeechTimer = setInterval(() => {
+      if (this.state === "playing") {
+        if (this.webSpeechDuration > 0) {
+          this.webSpeechElapsed = Math.min(this.webSpeechDuration, this.webSpeechElapsed + 0.2);
+        }
+        this.notify();
+      }
+    }, 200);
+  }
+  stopWebSpeechTimer() {
+    if (this.webSpeechTimer) {
+      clearInterval(this.webSpeechTimer);
+      this.webSpeechTimer = null;
+    }
+  }
+  playViaWebSpeech(segment, voiceId, startRatio = 0) {
+    this.activePlaybackSource = "webspeech";
+    if (this.audio) {
+      this.audio.pause();
+    }
     this.webSpeechProvider.stop();
-    this.setState("playing");
-    const sentencesToSpeak = segment.sentences && segment.sentences.length > 0 ? segment.sentences : [
+    this.stopWebSpeechTimer();
+    this.webSpeechCurrentVoiceId = voiceId;
+    this.webSpeechSentences = segment.sentences && segment.sentences.length > 0 ? segment.sentences : [
       {
         text: segment.cleanText,
         cleanText: segment.cleanText,
@@ -1154,10 +1319,26 @@ var TTSManager = class {
         weight: 1
       }
     ];
-    let sIdx = 0;
-    const speakNextSentence = () => {
+    const effectiveRate = Math.max(0.25, this.settings.rate || 1);
+    this.webSpeechDuration = Math.max(1, segment.cleanText.length / (15 * effectiveRate));
+    this.webSpeechElapsed = startRatio > 0 ? startRatio * this.webSpeechDuration : 0;
+    let startIdx = 0;
+    if (startRatio > 0) {
+      for (let i = 0; i < this.webSpeechSentences.length; i++) {
+        if (startRatio >= this.webSpeechSentences[i].startRatio) {
+          startIdx = i;
+        } else {
+          break;
+        }
+      }
+    }
+    this.webSpeechCurrentSentenceIdx = startIdx;
+    this.setState("playing");
+    this.startWebSpeechTimer();
+    const speakSentenceAt = (idx) => {
       if (this.state !== "playing") return;
-      if (sIdx >= sentencesToSpeak.length) {
+      if (idx >= this.webSpeechSentences.length) {
+        this.stopWebSpeechTimer();
         if (this.currentSegmentIndex + 1 < this.segments.length) {
           this.playSegment(this.currentSegmentIndex + 1);
         } else {
@@ -1166,13 +1347,14 @@ var TTSManager = class {
         }
         return;
       }
-      const currentSpan = sentencesToSpeak[sIdx];
-      sIdx++;
-      if (this.settings.highlightActiveSentence !== false && currentSpan.docFrom !== void 0 && currentSpan.docTo !== void 0) {
-        applyHighlightToActiveView(this.app, currentSpan.docFrom, currentSpan.docTo);
+      this.webSpeechCurrentSentenceIdx = idx;
+      const span = this.webSpeechSentences[idx];
+      this.webSpeechElapsed = span.startRatio * this.webSpeechDuration;
+      if (this.settings.highlightActiveSentence !== false && span.docFrom !== void 0 && span.docTo !== void 0) {
+        applyHighlightToActiveView(this.app, span.docFrom, span.docTo);
       }
       this.webSpeechProvider.speak(
-        currentSpan.cleanText || currentSpan.text,
+        span.cleanText || span.text,
         voiceId,
         {
           rate: this.settings.rate,
@@ -1181,19 +1363,23 @@ var TTSManager = class {
         },
         void 0,
         () => {
-          speakNextSentence();
+          if (this.state === "playing") {
+            speakSentenceAt(idx + 1);
+          }
         },
         (err) => {
           console.error("Speech Craft WebSpeech Error:", err);
-          if (sIdx < sentencesToSpeak.length) {
-            speakNextSentence();
-          } else {
-            this.stop();
+          if (this.state === "playing") {
+            if (idx + 1 < this.webSpeechSentences.length) {
+              speakSentenceAt(idx + 1);
+            } else {
+              this.stop();
+            }
           }
         }
       );
     };
-    speakNextSentence();
+    speakSentenceAt(this.webSpeechCurrentSentenceIdx);
   }
   async startPlaybackFromIndex(segments, index) {
     await this.startPlaybackFromIndexAndRatio(segments, index, 0);
@@ -1206,17 +1392,23 @@ var TTSManager = class {
     if (this.audio) {
       this.audio.pause();
     }
+    this.stopWebSpeechTimer();
     this.webSpeechProvider.stop();
     this.segments = segments;
     const targetIdx = Math.max(0, Math.min(index, segments.length - 1));
     await this.playSegment(targetIdx, startRatio, sessionId);
     if (this.currentSessionId === sessionId) {
-      this.prefetchSegment(targetIdx + 1);
-      this.prefetchSegment(targetIdx + 2);
+      setTimeout(() => {
+        if (this.currentSessionId === sessionId && this.state === "playing") {
+          this.prefetchSegment(targetIdx + 1);
+        }
+      }, 500);
     }
   }
   replayCurrentSegment() {
-    if (this.audio && !isNaN(this.audio.duration)) {
+    if (this.activePlaybackSource === "webspeech") {
+      this.playViaWebSpeech(this.segments[this.currentSegmentIndex], this.webSpeechCurrentVoiceId, 0);
+    } else if (this.audio && isFinite(this.audio.duration)) {
       this.audio.currentTime = 0;
       if (this.audio.paused) {
         this.audio.play();
@@ -1230,17 +1422,20 @@ var TTSManager = class {
     this.isDocumentEdited = true;
   }
   pause() {
-    if (this.settings.provider === "webspeech") {
+    this.isUserPaused = true;
+    if (this.activePlaybackSource === "webspeech") {
+      this.stopWebSpeechTimer();
       this.webSpeechProvider.pause();
       this.setState("paused");
       return;
     }
-    if (this.audio && !this.audio.paused) {
+    if (this.audio) {
       this.audio.pause();
       this.setState("paused");
     }
   }
   resume() {
+    this.isUserPaused = false;
     if (this.isDocumentEdited) {
       this.isDocumentEdited = false;
       if (this.segments.length > 0) {
@@ -1248,9 +1443,16 @@ var TTSManager = class {
         return;
       }
     }
-    if (this.settings.provider === "webspeech") {
-      this.webSpeechProvider.resume();
+    if (this.activePlaybackSource === "webspeech") {
       this.setState("playing");
+      this.startWebSpeechTimer();
+      if (this.webSpeechSentences && this.webSpeechCurrentSentenceIdx < this.webSpeechSentences.length) {
+        const span = this.webSpeechSentences[this.webSpeechCurrentSentenceIdx];
+        if (this.settings.highlightActiveSentence !== false && span?.docFrom !== void 0 && span?.docTo !== void 0) {
+          applyHighlightToActiveView(this.app, span.docFrom, span.docTo);
+        }
+      }
+      this.webSpeechProvider.resume();
       return;
     }
     if (this.audio && this.audio.paused && this.audio.src) {
@@ -1263,7 +1465,7 @@ var TTSManager = class {
     }
   }
   togglePlayPause() {
-    if (this.state === "playing") {
+    if (this.state === "playing" || this.state === "loading") {
       this.pause();
     } else if (this.state === "paused") {
       this.resume();
@@ -1273,6 +1475,10 @@ var TTSManager = class {
   }
   stop() {
     this.currentSessionId++;
+    this.stopWebSpeechTimer();
+    this.activePlaybackSource = "idle";
+    this.webSpeechElapsed = 0;
+    this.webSpeechDuration = 0;
     this.lastHighlightedSentence = null;
     clearHighlightFromActiveView(this.app);
     if (this.audio) {
@@ -1387,7 +1593,14 @@ var TTSManager = class {
     await this.playSegment(targetIdx, 0);
   }
   seek(seconds) {
-    if (this.audio && !isNaN(this.audio.duration)) {
+    if (this.activePlaybackSource === "webspeech") {
+      if (this.webSpeechDuration > 0) {
+        const ratio = Math.max(0, Math.min(1, seconds / this.webSpeechDuration));
+        this.playSegment(this.currentSegmentIndex, ratio);
+      }
+      return;
+    }
+    if (this.audio && isFinite(this.audio.duration) && this.audio.duration > 0) {
       this.audio.currentTime = Math.max(0, Math.min(seconds, this.audio.duration));
       this.notify();
     }
@@ -1726,7 +1939,7 @@ var import_obsidian5 = require("obsidian");
 
 // src/utils/time.ts
 function formatSeconds(totalSeconds, forceHours = false) {
-  if (isNaN(totalSeconds) || totalSeconds < 0) {
+  if (isNaN(totalSeconds) || !isFinite(totalSeconds) || totalSeconds < 0) {
     totalSeconds = 0;
   }
   const rounded = Math.floor(totalSeconds);
@@ -1832,7 +2045,27 @@ var PlayerBar = class {
     el.createDiv({ cls: "sc-pill-divider sc-pill-divider-desktop-2" });
     const controlsRow = el.createDiv({ cls: "sc-pill-controls-row" });
     const badgeGroup = controlsRow.createDiv({ cls: "sc-pill-badge-group" });
-    this.langBadge = badgeGroup.createSpan({ cls: "sc-pill-badge", text: "EN" });
+    this.langBadge = badgeGroup.createSpan({
+      cls: "sc-pill-badge sc-pill-badge-clickable",
+      text: "EN",
+      attr: {
+        role: "button",
+        tabindex: "0",
+        "aria-label": "Language: English (Click to switch to Hindi)",
+        title: "Language: English (Click to switch to Hindi)"
+      }
+    });
+    this.langBadge.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.ttsManager.toggleCurrentLanguage();
+    };
+    this.langBadge.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        this.ttsManager.toggleCurrentLanguage();
+      }
+    };
     this.segmentCounter = badgeGroup.createSpan({
       cls: "sc-pill-counter sc-pill-counter-clickable",
       text: "\xB6 1/1",
@@ -1964,9 +2197,13 @@ var PlayerBar = class {
       if (status.activeSegment.lang === "hi") {
         this.langBadge.setText("HI");
         this.langBadge.addClass("sc-badge-hi");
+        this.langBadge.setAttribute("title", "Language: Hindi (Click to switch to English)");
+        this.langBadge.setAttribute("aria-label", "Language: Hindi (Click to switch to English)");
       } else {
         this.langBadge.setText("EN");
         this.langBadge.removeClass("sc-badge-hi");
+        this.langBadge.setAttribute("title", "Language: English (Click to switch to Hindi)");
+        this.langBadge.setAttribute("aria-label", "Language: English (Click to switch to Hindi)");
       }
     }
     if (this.segmentCounter) {
@@ -2076,7 +2313,7 @@ var SpeechCraftSettingTab = class extends import_obsidian6.PluginSettingTab {
             btn.setButtonText("Test Key").setCta().onClick(async () => {
               const key = this.plugin.keychainService.getGoogleApiKey(this.plugin.settings);
               if (!key) {
-                new import_obsidian6.Notice("\u274C No secret selected or secret is empty in Obsidian Keychain.");
+                new import_obsidian6.Notice("No secret selected or secret is empty in Obsidian Keychain.");
                 return;
               }
               btn.setButtonText("Testing...");
@@ -2085,7 +2322,7 @@ var SpeechCraftSettingTab = class extends import_obsidian6.PluginSettingTab {
                 const testUrl = `https://texttospeech.googleapis.com/v1/voices?key=${key}`;
                 const res = await obsidian.requestUrl({ url: testUrl });
                 if (res.status === 200) {
-                  new import_obsidian6.Notice("\u2705 Google Cloud API Key verified! Unlocked Neural2 & Journey voices.");
+                  new import_obsidian6.Notice("Google Cloud API Key verified! Unlocked Neural2 & Journey voices.");
                   if (this.plugin.settings.defaultEnglishVoice === "en") {
                     this.plugin.settings.defaultEnglishVoice = "en-US-Neural2-F";
                   }
@@ -2096,10 +2333,10 @@ var SpeechCraftSettingTab = class extends import_obsidian6.PluginSettingTab {
                   this.plugin.ttsManager.clearVoiceCache();
                   await renderVoicesSection();
                 } else {
-                  new import_obsidian6.Notice(`\u274C Google Cloud API returned status ${res.status}`);
+                  new import_obsidian6.Notice(`Google Cloud API returned status ${res.status}`);
                 }
               } catch (err) {
-                new import_obsidian6.Notice(`\u274C Failed to verify key: ${err?.message || "Invalid API key"}`);
+                new import_obsidian6.Notice(`Failed to verify key: ${err?.message || "Invalid API key"}`);
               } finally {
                 btn.setButtonText("Test Key");
                 btn.setDisabled(false);
@@ -2148,7 +2385,7 @@ var SpeechCraftSettingTab = class extends import_obsidian6.PluginSettingTab {
                   secretCompInstance.setValue("google-cloud-api-key");
                 }
                 await renderVoicesSection();
-                new import_obsidian6.Notice("\u2705 Saved Google Cloud API key to Obsidian Keychain and unlocked Neural voices!");
+                new import_obsidian6.Notice("Saved Google Cloud API key to Obsidian Keychain and unlocked Neural voices!");
               } catch (err) {
                 new import_obsidian6.Notice(`Failed to save to Keychain: ${err?.message || "Unknown error"}`);
               }
@@ -2246,11 +2483,11 @@ var SpeechCraftSettingTab = class extends import_obsidian6.PluginSettingTab {
         if (hasKey) {
           bannerDiv.style.backgroundColor = "rgba(46, 160, 67, 0.15)";
           bannerDiv.style.color = "var(--text-success, #2ea043)";
-          bannerDiv.setText("\u26A1 Google Cloud API Key Active \u2014 Premium Neural2, Journey & WaveNet voices unlocked!");
+          bannerDiv.setText("Google Cloud API Key Active \u2014 Premium Neural2, Journey & WaveNet voices unlocked!");
         } else {
           bannerDiv.style.backgroundColor = "rgba(128, 128, 128, 0.1)";
           bannerDiv.style.color = "var(--text-muted)";
-          bannerDiv.setText("\u2139\uFE0F Free Google TTS Active \u2014 Using standard voices. Select a Keychain secret or add an API key above to unlock Neural voices.");
+          bannerDiv.setText("Free Google TTS Active \u2014 Using standard voices. Select a Keychain secret or add an API key above to unlock Neural voices.");
         }
       }
       if (englishVoices.length > 0 && !englishVoices.some((v) => v.id === this.plugin.settings.defaultEnglishVoice)) {
@@ -2277,7 +2514,7 @@ var SpeechCraftSettingTab = class extends import_obsidian6.PluginSettingTab {
         });
       });
       enSetting.addButton((btn) => {
-        btn.setButtonText("\u{1F50A} Test English").onClick(() => {
+        btn.setIcon("volume-2").setButtonText("Test English").onClick(() => {
           this.previewVoice("Hello! This is a test of your English text to speech settings.", "en");
         });
       });
@@ -2297,7 +2534,7 @@ var SpeechCraftSettingTab = class extends import_obsidian6.PluginSettingTab {
         });
       });
       hiSetting.addButton((btn) => {
-        btn.setButtonText("\u{1F50A} Test Hindi").onClick(() => {
+        btn.setIcon("volume-2").setButtonText("Test Hindi").onClick(() => {
           this.previewVoice("\u0928\u092E\u0938\u094D\u0924\u0947! \u092F\u0939 \u0906\u092A\u0915\u0940 \u0939\u093F\u0902\u0926\u0940 \u091F\u0947\u0915\u094D\u0938\u094D\u091F \u091F\u0942 \u0938\u094D\u092A\u0940\u091A \u0938\u0947\u091F\u093F\u0902\u0917 \u0915\u093E \u092A\u0930\u0940\u0915\u094D\u0937\u0923 \u0939\u0948\u0964", "hi");
         });
       });
@@ -2648,7 +2885,7 @@ var SpeechCraftPlugin = class extends import_obsidian9.Plugin {
     this.playerBar.mount(document.body);
     this.statusBarEl = this.addStatusBarItem();
     this.statusBarEl.addClass("speech-craft-status-bar");
-    this.statusBarEl.setText("\u{1F3A7} Speech Craft");
+    this.statusBarEl.setText("Speech Craft");
     this.statusBarEl.onclick = () => {
       const status = this.ttsManager.getStatus();
       if (status.state === "idle") {
@@ -2671,13 +2908,13 @@ var SpeechCraftPlugin = class extends import_obsidian9.Plugin {
         this.debouncedSaveSettings();
       }
       if (status.state === "playing") {
-        this.statusBarEl.setText(`\u{1F50A} Playing (\xB6 ${status.currentSegmentIndex + 1}/${status.totalSegments})`);
+        this.statusBarEl.setText(`Playing (\xB6 ${status.currentSegmentIndex + 1}/${status.totalSegments})`);
       } else if (status.state === "paused") {
-        this.statusBarEl.setText(`\u23F8 Paused`);
+        this.statusBarEl.setText("Paused");
       } else if (status.state === "loading") {
-        this.statusBarEl.setText(`\u23F3 Synthesizing...`);
+        this.statusBarEl.setText("Synthesizing...");
       } else {
-        this.statusBarEl.setText("\u{1F3A7} Speech Craft");
+        this.statusBarEl.setText("Speech Craft");
       }
     });
     this.addRibbonIcon("headphones", "Speech Craft: Read note / selection", () => {

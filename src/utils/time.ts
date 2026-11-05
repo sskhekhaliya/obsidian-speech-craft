@@ -1,5 +1,5 @@
 export function formatSeconds(totalSeconds: number, forceHours: boolean = false): string {
-  if (isNaN(totalSeconds) || totalSeconds < 0) {
+  if (isNaN(totalSeconds) || !isFinite(totalSeconds) || totalSeconds < 0) {
     totalSeconds = 0;
   }
   const rounded = Math.floor(totalSeconds);

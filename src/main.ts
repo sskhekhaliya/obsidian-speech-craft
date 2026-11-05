@@ -90,7 +90,7 @@ export default class SpeechCraftPlugin extends Plugin {
     // 4. Status Bar Item
     this.statusBarEl = this.addStatusBarItem();
     this.statusBarEl.addClass("speech-craft-status-bar");
-    this.statusBarEl.setText("🎧 Speech Craft");
+    this.statusBarEl.setText("Speech Craft");
     this.statusBarEl.onclick = () => {
       const status = this.ttsManager.getStatus();
       if (status.state === "idle") {
@@ -117,13 +117,13 @@ export default class SpeechCraftPlugin extends Plugin {
       }
 
       if (status.state === "playing") {
-        this.statusBarEl.setText(`🔊 Playing (¶ ${status.currentSegmentIndex + 1}/${status.totalSegments})`);
+        this.statusBarEl.setText(`Playing (¶ ${status.currentSegmentIndex + 1}/${status.totalSegments})`);
       } else if (status.state === "paused") {
-        this.statusBarEl.setText(`⏸ Paused`);
+        this.statusBarEl.setText("Paused");
       } else if (status.state === "loading") {
-        this.statusBarEl.setText(`⏳ Synthesizing...`);
+        this.statusBarEl.setText("Synthesizing...");
       } else {
-        this.statusBarEl.setText("🎧 Speech Craft");
+        this.statusBarEl.setText("Speech Craft");
       }
     });
 

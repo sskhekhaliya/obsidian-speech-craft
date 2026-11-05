@@ -119,7 +119,27 @@ export class PlayerBar {
 
     // 2a. Language badge & Segment progress counter
     const badgeGroup = controlsRow.createDiv({ cls: "sc-pill-badge-group" });
-    this.langBadge = badgeGroup.createSpan({ cls: "sc-pill-badge", text: "EN" });
+    this.langBadge = badgeGroup.createSpan({
+      cls: "sc-pill-badge sc-pill-badge-clickable",
+      text: "EN",
+      attr: {
+        role: "button",
+        tabindex: "0",
+        "aria-label": "Language: English (Click to switch to Hindi)",
+        title: "Language: English (Click to switch to Hindi)"
+      }
+    });
+    this.langBadge.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.ttsManager.toggleCurrentLanguage();
+    };
+    this.langBadge.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        this.ttsManager.toggleCurrentLanguage();
+      }
+    };
     this.segmentCounter = badgeGroup.createSpan({
       cls: "sc-pill-counter sc-pill-counter-clickable",
       text: "¶ 1/1",
@@ -279,9 +299,13 @@ export class PlayerBar {
       if (status.activeSegment.lang === "hi") {
         this.langBadge.setText("HI");
         this.langBadge.addClass("sc-badge-hi");
+        this.langBadge.setAttribute("title", "Language: Hindi (Click to switch to English)");
+        this.langBadge.setAttribute("aria-label", "Language: Hindi (Click to switch to English)");
       } else {
         this.langBadge.setText("EN");
         this.langBadge.removeClass("sc-badge-hi");
+        this.langBadge.setAttribute("title", "Language: English (Click to switch to Hindi)");
+        this.langBadge.setAttribute("aria-label", "Language: English (Click to switch to Hindi)");
       }
     }
 

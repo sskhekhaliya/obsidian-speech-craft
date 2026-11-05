@@ -146,11 +146,18 @@ export class EdgeTtsProvider implements TTSProvider {
         escapedText = escapedText.replace(/([—–]|\s--\s)/g, ' <break strength="weak"/> ');
         escapedText = escapedText.replace(/([।॥])(\s*)/g, '$1 <break strength="medium"/>$2');
 
-        const lang = options.lang || (voiceId.startsWith("hi") ? "hi-IN" : "en-US");
+        let resolvedVoice = voiceId;
+        if (resolvedVoice === "hi" || (resolvedVoice.startsWith("hi-IN") && !resolvedVoice.includes("Neural"))) {
+          resolvedVoice = "hi-IN-SwaraNeural";
+        } else if (resolvedVoice === "en" || (resolvedVoice.startsWith("en-US") && !resolvedVoice.includes("Neural"))) {
+          resolvedVoice = "en-US-JennyNeural";
+        }
+
+        const lang = options.lang || (resolvedVoice.startsWith("hi") ? "hi-IN" : "en-US");
 
         const ssml =
           `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="${lang}">` +
-          `<voice name="${voiceId}">` +
+          `<voice name="${resolvedVoice}">` +
           `<prosody pitch="${pitchStr}" rate="${rateStr}" volume="${volumeStr}">` +
           `${escapedText}` +
           `</prosody>` +

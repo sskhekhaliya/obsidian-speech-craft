@@ -129,7 +129,7 @@ export class SpeechCraftSettingTab extends PluginSettingTab {
                 .onClick(async () => {
                   const key = this.plugin.keychainService.getGoogleApiKey(this.plugin.settings);
                   if (!key) {
-                    new Notice("❌ No secret selected or secret is empty in Obsidian Keychain.");
+                    new Notice("No secret selected or secret is empty in Obsidian Keychain.");
                     return;
                   }
                   btn.setButtonText("Testing...");
@@ -138,7 +138,7 @@ export class SpeechCraftSettingTab extends PluginSettingTab {
                     const testUrl = `https://texttospeech.googleapis.com/v1/voices?key=${key}`;
                     const res = await (obsidian as any).requestUrl({ url: testUrl });
                     if (res.status === 200) {
-                      new Notice("✅ Google Cloud API Key verified! Unlocked Neural2 & Journey voices.");
+                      new Notice("Google Cloud API Key verified! Unlocked Neural2 & Journey voices.");
                       if (this.plugin.settings.defaultEnglishVoice === "en") {
                         this.plugin.settings.defaultEnglishVoice = "en-US-Neural2-F";
                       }
@@ -149,10 +149,10 @@ export class SpeechCraftSettingTab extends PluginSettingTab {
                       this.plugin.ttsManager.clearVoiceCache();
                       await renderVoicesSection();
                     } else {
-                      new Notice(`❌ Google Cloud API returned status ${res.status}`);
+                      new Notice(`Google Cloud API returned status ${res.status}`);
                     }
                   } catch (err: any) {
-                    new Notice(`❌ Failed to verify key: ${err?.message || "Invalid API key"}`);
+                    new Notice(`Failed to verify key: ${err?.message || "Invalid API key"}`);
                   } finally {
                     btn.setButtonText("Test Key");
                     btn.setDisabled(false);
@@ -215,7 +215,7 @@ export class SpeechCraftSettingTab extends PluginSettingTab {
                       secretCompInstance.setValue("google-cloud-api-key");
                     }
                     await renderVoicesSection();
-                    new Notice("✅ Saved Google Cloud API key to Obsidian Keychain and unlocked Neural voices!");
+                    new Notice("Saved Google Cloud API key to Obsidian Keychain and unlocked Neural voices!");
                   } catch (err: any) {
                     new Notice(`Failed to save to Keychain: ${err?.message || "Unknown error"}`);
                   }
@@ -380,11 +380,11 @@ export class SpeechCraftSettingTab extends PluginSettingTab {
         if (hasKey) {
           bannerDiv.style.backgroundColor = "rgba(46, 160, 67, 0.15)";
           bannerDiv.style.color = "var(--text-success, #2ea043)";
-          bannerDiv.setText("⚡ Google Cloud API Key Active — Premium Neural2, Journey & WaveNet voices unlocked!");
+          bannerDiv.setText("Google Cloud API Key Active — Premium Neural2, Journey & WaveNet voices unlocked!");
         } else {
           bannerDiv.style.backgroundColor = "rgba(128, 128, 128, 0.1)";
           bannerDiv.style.color = "var(--text-muted)";
-          bannerDiv.setText("ℹ️ Free Google TTS Active — Using standard voices. Select a Keychain secret or add an API key above to unlock Neural voices.");
+          bannerDiv.setText("Free Google TTS Active — Using standard voices. Select a Keychain secret or add an API key above to unlock Neural voices.");
         }
       }
 
@@ -419,9 +419,11 @@ export class SpeechCraftSettingTab extends PluginSettingTab {
       });
 
       enSetting.addButton((btn) => {
-        btn.setButtonText("🔊 Test English").onClick(() => {
-          this.previewVoice("Hello! This is a test of your English text to speech settings.", "en");
-        });
+        btn.setIcon("volume-2")
+          .setButtonText("Test English")
+          .onClick(() => {
+            this.previewVoice("Hello! This is a test of your English text to speech settings.", "en");
+          });
       });
 
       // Default Hindi Voice Setting with Preview Button
@@ -445,9 +447,11 @@ export class SpeechCraftSettingTab extends PluginSettingTab {
       });
 
       hiSetting.addButton((btn) => {
-        btn.setButtonText("🔊 Test Hindi").onClick(() => {
-          this.previewVoice("नमस्ते! यह आपकी हिंदी टेक्स्ट टू स्पीच सेटिंग का परीक्षण है।", "hi");
-        });
+        btn.setIcon("volume-2")
+          .setButtonText("Test Hindi")
+          .onClick(() => {
+            this.previewVoice("नमस्ते! यह आपकी हिंदी टेक्स्ट टू स्पीच सेटिंग का परीक्षण है।", "hi");
+          });
       });
     };
 
